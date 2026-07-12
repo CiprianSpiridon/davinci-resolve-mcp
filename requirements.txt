@@ -1,0 +1,10 @@
+# Runtime dependencies for davinci-resolve-mcp.
+# Prefer `pip install -e .` (reads pyproject.toml) — this file is a convenience mirror.
+
+mcp[cli]>=1.3.0
+
+# macOS only — enables the screenshot tool to capture the Resolve window.
+pyobjc-framework-Quartz>=10.0 ; sys_platform == "darwin"
+
+# Optional: local transcription (Apple Silicon). See pyproject "transcription" extra.
+# mlx-whisper>=0.4.3 ; sys_platform == "darwin"
