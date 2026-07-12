@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "davinci-resolve": {
+      "command": "/absolute/path/to/davinci-resolve-mcp/.venv/bin/davinci-resolve-mcp",
+      "args": [],
+      "env": {
+        "RESOLVE_SCRIPT_LIB": "/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fusionscript.so",
+        "RESOLVE_SCRIPT_API": "/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting",
+        "RESOLVE_MCP_LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}
