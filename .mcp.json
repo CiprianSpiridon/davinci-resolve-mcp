@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "davinci-resolve": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/CiprianSpiridon/davinci-resolve-mcp.git",
+        "davinci-resolve-mcp"
+      ],
+      "env": {
+        "RESOLVE_MCP_LOG_LEVEL": "INFO"
+      }
+    }
+  }
+}

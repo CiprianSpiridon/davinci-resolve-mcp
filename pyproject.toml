@@ -37,6 +37,17 @@ screenshot = [
     "mss>=9.0; sys_platform != 'darwin'",
     "pillow>=10.0; sys_platform != 'darwin'",
 ]
+# Offline/advanced tools (drx, drt, drp, pipeline, ...): all of these degrade
+# gracefully without these libraries (a tool returns a clear "Error: ..."
+# JSON string for the one action that needs the missing package), so they
+# are optional rather than hard dependencies of the base install.
+#   - zstandard: (de)compresses the .drx grade FieldsBlob (drx_codec).
+#   - pyyaml: parses YAML pipeline specs (off_pipeline); JSON specs need no
+#     extra dependency at all.
+offline = [
+    "zstandard>=0.22",
+    "pyyaml>=6.0",
+]
 
 [project.scripts]
 davinci-resolve-mcp = "davinci_resolve_mcp.server:main"
@@ -54,6 +65,9 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"davinci_resolve_mcp" = ["**/*.drx"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-marketplace.json",
+  "name": "davinci-resolve-mcp",
+  "owner": {
+    "name": "davinci-resolve-mcp contributors",
+    "email": "contact@ciprianspiridon.com",
+    "url": "https://github.com/CiprianSpiridon/davinci-resolve-mcp"
+  },
+  "metadata": {
+    "description": "Marketplace for the davinci-resolve Claude Code plugin (MCP server + agent skill for DaVinci Resolve Studio).",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "davinci-resolve",
+      "source": "./",
+      "description": "Full-coverage MCP server for DaVinci Resolve Studio (editing, media pool, color grading, Fusion, Fairlight, AI/Neural Engine, rendering, local transcription — 190 live tools) plus 18 offline/advanced tools (.drx/.drt/.drp, CDL/LUT, project DB, provenance) that work without Resolve running. Bundles the davinci-resolve agent skill for onboarding and day-to-day operation.",
+      "version": "1.0.0",
+      "author": {
+        "name": "davinci-resolve-mcp contributors",
+        "email": "contact@ciprianspiridon.com",
+        "url": "https://github.com/CiprianSpiridon/davinci-resolve-mcp"
+      },
+      "homepage": "https://github.com/CiprianSpiridon/davinci-resolve-mcp",
+      "repository": "https://github.com/CiprianSpiridon/davinci-resolve-mcp",
+      "license": "MIT",
+      "keywords": [
+        "davinci-resolve",
+        "mcp",
+        "model-context-protocol",
+        "blackmagic",
+        "video-editing",
+        "color-grading",
+        "fusion",
+        "fairlight"
+      ]
+    }
+  ]
+}

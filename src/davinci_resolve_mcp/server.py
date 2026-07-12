@@ -50,6 +50,31 @@ from .tools import timeline_edit  # noqa: F401
 from .tools import timeline_item  # noqa: F401
 from .tools import transcription  # noqa: F401
 
+# ── Offline (no-Resolve) tool module registration ───────────────────────
+# These 18 modules never contact a running Resolve instance — they operate
+# purely on files (.drx/.drt/.drp, CDL, LUT, project JSON, a local SQLite
+# store) and always return JSON strings (or an "Error: ..." string on
+# failure). Same side-effect-on-import wiring as the live tools above:
+# removing one of these imports drops exactly that tool.
+from .tools import off_audio  # noqa: F401
+from .tools import off_audio_plan  # noqa: F401
+from .tools import off_capabilities  # noqa: F401
+from .tools import off_color_trace  # noqa: F401
+from .tools import off_conform  # noqa: F401
+from .tools import off_deliverable  # noqa: F401
+from .tools import off_drp  # noqa: F401
+from .tools import off_drt  # noqa: F401
+from .tools import off_drx  # noqa: F401
+from .tools import off_editorial  # noqa: F401
+from .tools import off_fairlight  # noqa: F401
+from .tools import off_fusion  # noqa: F401
+from .tools import off_media  # noqa: F401
+from .tools import off_offline_ref  # noqa: F401
+from .tools import off_pipeline  # noqa: F401
+from .tools import off_project_db  # noqa: F401
+from .tools import off_project_read  # noqa: F401
+from .tools import off_provenance  # noqa: F401
+
 __all__ = ["mcp", "main"]
 
 

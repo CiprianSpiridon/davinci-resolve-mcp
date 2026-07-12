@@ -1,0 +1,44 @@
+# npm distribution bootstrapper — this package ships only the pieces needed to
+# discover + install the Python MCP server (see package.json "files" for the
+# authoritative allow-list). This .npmignore is defense-in-depth: it keeps the
+# tarball clean even if "files" is ever loosened or npm falls back to it.
+
+# Python virtualenv / build artifacts (never ship a local venv)
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Tests and fixtures — not needed to run the installed server
+tests/
+
+
+# Planning / workflow tooling for this repo, not part of the shipped product
+.ulpi/
+.agents/
+.claude/
+skills-lock.json
+
+# Editor/session/OS noise
+.git/
+.gitignore
+.env
+.env.example
+.DS_Store
+*.log
+
+# Repo-only docs not needed by installers
+QUICKSTART.md
+claude_desktop_config.example.json

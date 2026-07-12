@@ -5,19 +5,24 @@ A full-coverage [Model Context Protocol](https://modelcontextprotocol.io) server
 compositing, Fairlight audio, AI/Neural Engine features, and rendering from any MCP
 client (Claude Desktop, Cursor, or your own agent).
 
-190 tools across 18 domain modules. Original implementation, built and validated
-without any live Resolve instance connected — every tool connects lazily, on first
-call.
+208 tools — **190 live** tools across 18 domain modules that drive a running Resolve
+instance via its scripting API, plus **18 offline** tools that read/write Resolve's own
+files (`.drp`/`.drt`/`.drx`) and a local SQLite store with **no Resolve connection at
+all**. One server, one process, one `mcp = FastMCP(...)` instance — every tool connects
+lazily (live tools) or touches only local files (offline tools), on first call.
 
 ## Table of contents
 
 - [What & why](#what--why)
 - [Architecture](#architecture)
 - [Tool catalog](#tool-catalog)
+- [Offline (no-Resolve) tools](#offline-no-resolve-tools)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage with Claude Desktop](#usage-with-claude-desktop)
 - [Usage with Cursor](#usage-with-cursor)
+- [Agent skill (Claude Code, Cowork, and more)](#agent-skill-claude-code-cowork-and-more)
+- [Claude Code / Cowork plugin](#claude-code--cowork-plugin)
 - [Development & validation](#development--validation)
 - [License](#license)
 
@@ -74,11 +79,18 @@ src/davinci_resolve_mcp/
 ├── resources.py        # read-only resolve://... MCP resources (project info,
 │                      # current timeline, media pool structure)
 ├── transcription_engine.py  # local Whisper wrapper (mlx-whisper / openai-whisper)
+├── formats/            # OFFLINE codecs: drx_xml, drx_codec (zstd FieldsBlob),
+│                      # cdl, lut, drt, drp — parse/author Resolve's own files
+├── store/               # OFFLINE DB-as-truth: db.py (local SQLite project/run/
+│                      # stage store), provenance.py (append-only audit ledger)
+├── grading/             # OFFLINE deterministic compute cores: cdl_ops,
+│                      # white_balance, skin_match, qc (broadcast-legal/gamut)
 └── tools/              # one module per Resolve API domain — see catalog below
     ├── ai.py, audio.py, code.py, color.py, export_still.py, fusion.py,
     ├── media_pool.py, media_pool_item.py, media_storage.py, project.py,
     ├── project_manager.py, render.py, resolve_app.py, screenshot.py,
-    └── timeline.py, timeline_edit.py, timeline_item.py, transcription.py
+    ├── timeline.py, timeline_edit.py, timeline_item.py, transcription.py,
+    └── off_*.py           # 18 offline tools — see "Offline (no-Resolve) tools"
 ```
 
 **The rules that keep this architecture sound:**
@@ -101,12 +113,23 @@ src/davinci_resolve_mcp/
   in `tools/color.py`; `export_timeline` lives in `tools/export_still.py`) so two
   modules can never register a tool with the same name — MCP requires every tool name
   to be globally unique, and `tests/test_tool_exposure.py` asserts this holds.
+- **The 18 offline tools follow the same rules, minus the Resolve connection.** Each
+  `tools/off_*.py` module still starts with `from ..app import mcp` and registers with
+  `@mcp.tool()` against the same shared instance — `server.py` imports them exactly
+  like the live modules, so removing one `off_*` import drops exactly that tool. But
+  they **never** call `helpers._conn()` and never import `DaVinciResolveScript` —
+  instead they read/write local files (`.drp`/`.drt`/`.drx`, `.comp`, media) and a local
+  SQLite store (`store/db.py`, `store/provenance.py`) by composing the `formats/`,
+  `store/`, and `grading/` layers. See
+  [Offline (no-Resolve) tools](#offline-no-resolve-tools) below.
 
 ## Tool catalog
 
-**190 tools** registered across 18 domain modules (verified by
-`tests/test_tool_exposure.py`, which imports the whole server with no Resolve instance
-present and asserts on `mcp.list_tools()`), plus 3 read-only MCP resources and 1 prompt.
+**208 tools total** (verified by `tests/test_tool_exposure.py`, which imports the whole
+server with no Resolve instance present and asserts on `mcp.list_tools()`): **190 live**
+tools across the 18 domain modules below, driving a running Resolve instance, plus **18
+offline** tools (covered in the [next section](#offline-no-resolve-tools)) that never
+touch Resolve at all. Also 3 read-only MCP resources and 1 prompt.
 
 | Module | Domain | Tools |
 |---|---|---:|
@@ -137,15 +160,82 @@ Plus:
   driving Resolve through this tool surface.
 
 Run `./.venv/bin/python -c "from davinci_resolve_mcp.server import mcp; import asyncio; print(len(asyncio.run(mcp.list_tools())))"`
-yourself at any time to re-verify the live count — no Resolve installation required.
+yourself at any time to re-verify the live count (190 + 18 = 208) — no Resolve
+installation required.
+
+## Offline (no-Resolve) tools
+
+18 tools that never open a Resolve connection — no `_conn()`, no
+`DaVinciResolveScript`, no import-time Resolve. Each is a **single
+action-dispatch** `@mcp.tool()` (one tool name, an `action` parameter, and
+typed per-action arguments) that reads and/or writes local files — Resolve's
+own `.drp`/`.drt`/`.drx`/`.comp` formats, plus a local SQLite store — and
+returns a JSON string. Failures come back as an `"Error: ..."` string, exactly
+like the live tools, never a raised exception.
+
+**Any tool action that writes or mutates state returns `"verified": false`
+in its JSON result.** That flag means the write is *structurally* correct —
+it round-trips through this project's own parser, matches the on-disk format
+byte-for-byte where checked, and passes the automated test fixtures — but it
+has **not yet been calibrated by loading the result into a live DaVinci
+Resolve** and confirming Resolve reads it identically. Treat `"verified":
+false` output as "correct by construction, unconfirmed by Resolve itself"
+until you've round-tripped it through a real Resolve session. (Read-only
+actions that write nothing return no `"verified"` field at all — there is
+nothing to verify.)
+
+Query `capabilities` (action `"report"`) at any time for a live, in-process
+inventory of every offline domain, its action vocabulary, and which optional
+dependencies (`ffmpeg`, PyYAML, `zstandard`) are available in the current
+interpreter — all 18 below degrade to a clear `"Error: ..."` string for the
+one action that needs a missing optional dependency, rather than failing to
+import.
+
+| Tool name | Domain | What it does |
+|---|---|---|
+| `capabilities` | Self-inspection | Report offline dependency availability + the domain/action catalog, as JSON. |
+| `drx` | `.drx` grade files | Inspect/decode a PowerGrade's zstd-compressed `FieldsBlob`, export/import ASC-CDL, attach a LUT, apply catalog grading ops, verify against a fixture. |
+| `drt` | `.drt` timelines | Parse, author, and surgically edit a `.drt`/`.drp` `SeqContainer` timeline (tracks, clips, in/out frames). |
+| `drp` | `.drp` projects | Read/author a `.drp` Resolve Project — folders, Media-Pool clips, timelines, embedded Project XML. |
+| `project_read` | Read-only inspector | One-call read of any `.drp` or `.drt` file into a flattened `{timelines, clipRecords, ...}` summary. |
+| `project_db` | DB-backed grade ops | Batch operations (e.g. node-graph relayout) across a set of local `.drx` grade files. |
+| `offline_ref` | Reference frames | Extract a still frame from local media via `ffmpeg`, and tag shot intent. |
+| `conform` | Conform/relink QC | Diff a project's recorded media links against an on-disk manifest by frame math, not filename guessing. |
+| `color_trace` | Grade carry-over | Match clips between a graded project and its re-conform by content identity, and carry grades across. |
+| `offline_fusion` | `.comp` files | Inspect/edit a Fusion composition file's node graph offline. |
+| `audio_plan` | Fairlight planning | Turn a project spec into a Fairlight track/stem plan, plus coverage/loudness analysis. |
+| `fairlight_plan` | Bus routing | Compute a Fairlight bus-routing plan (the scripting API can't create buses; this plans what a DB patch would need). |
+| `offline_audio` | Loudness/level QC | Measure LUFS/dBTP/LRA for a media file via `ffmpeg`'s `ebur128` filter, with optional pass/fail targets. |
+| `pipeline` | DB-as-truth orchestration | Compile a spec into the local SQLite store, run pipeline stages with gates, and track intent-vs-actual drift. |
+| `deliverable` | Compliance QC | Run a named compliance profile (broadcast-legal/gamut + custom checks) against caller-supplied numbers. |
+| `media_ingest` | Assistant-editor ingest | Scan a folder into a SQLite media manifest (hash + optional `ffprobe` technical metadata). |
+| `editorial` | Changelist diffing | Diff two `.drp`/`.drt` projects by clip `DbId` identity and report what changed. |
+| `provenance` | Audit ledger | Append and query an immutable provenance/audit trail in the local SQLite store. |
+
+These compose four internal layers that do the real parsing/computation —
+tools never reimplement it themselves:
+
+- **`formats/`** — `drx_xml`, `drx_codec` (the length-prefixed zstd
+  `FieldsBlob` codec, via the `zstandard` package), `cdl`, `lut`, `drt`, `drp`.
+- **`store/`** — `db.py` (the local SQLite project/run/stage store) and
+  `provenance.py` (the append-only ledger layered on it).
+- **`grading/`** — deterministic compute cores: `cdl_ops`, `white_balance`,
+  `skin_match`, `qc` (broadcast-legal/gamut checks).
+- Optional executables/packages (`ffmpeg`, PyYAML, `zstandard`) are declared
+  as the `offline` extra in `pyproject.toml` — install with
+  `./.venv/bin/pip install -e ".[offline]"`; every tool still imports and
+  degrades gracefully without them.
+
+studied and reimplemented from scratch in Python.
 
 ## Installation
 
 > **Want an AI agent (e.g. Claude Code) to set this up for you?** Hand it
 > [`INSTALL.md`](./INSTALL.md) — an imperative, gated setup runbook written for an agent
-> to execute end-to-end (detect OS → install → verify 190 tools offline → enable Resolve
-> scripting → register with your MCP client → live smoke test). The steps below are the
-> same process for a human.
+> to execute end-to-end (detect OS → install → verify tool registration offline → enable
+> Resolve scripting → register with your MCP client → live smoke test). The steps below
+> are the same process for a human. (`INSTALL.md`'s own gate prints its own tool count —
+> see [`INSTALL.md`](./INSTALL.md) for the exact figure it currently checks.)
 
 Requirements: Python **3.10+**, and DaVinci Resolve (Studio recommended — some tools
 are Studio-only and degrade to an explanatory error string on the free edition)
@@ -183,9 +273,9 @@ npx @ciprianspiridon/davinci-resolve-mcp doctor      # health check
 # from the repo without npm publish: npx github:CiprianSpiridon/davinci-resolve-mcp setup
 ```
 
-After installing, check health any time with **`davinci-resolve-mcp doctor`** (verifies the
-190 tools register and, if Resolve is running, that a live connection succeeds). The
-`setup`/`doctor` subcommands are also available on the console script directly
+After installing, check health any time with **`davinci-resolve-mcp doctor`** (verifies
+all 208 tools — 190 live + 18 offline — register and, if Resolve is running, that a live
+connection succeeds). The `setup`/`doctor` subcommands are also available on the console script directly
 (`davinci-resolve-mcp setup --clients cursor`).
 
 ### Manual
@@ -306,6 +396,28 @@ Or copy it into the global skills directory manually (Claude Code + Cowork both 
 mkdir -p ~/.claude/skills && cp -r davinci-resolve ~/.claude/skills/davinci-resolve
 ```
 
+## Claude Code / Cowork plugin
+
+The repo is also installable as a **Claude Code plugin** — this bundles both the MCP
+server registration (via `.mcp.json`, using `uvx` so there's no manual `pip install`)
+and the [agent skill](#agent-skill-claude-code-cowork-and-more) in one step, using the
+repo itself as a plugin marketplace
+([`.claude-plugin/marketplace.json`](./.claude-plugin/marketplace.json) +
+[`.claude-plugin/plugin.json`](./.claude-plugin/plugin.json)):
+
+```bash
+claude plugin marketplace add CiprianSpiridon/davinci-resolve-mcp
+claude plugin install davinci-resolve
+```
+
+This works the same way in **Claude Code** and **Claude Cowork** (both read the same
+plugin/marketplace configuration). After install, restart the client if prompted; the
+`davinci-resolve` MCP server and the `davinci-resolve` skill are both active with no
+further setup. Requires Python 3.10+ and `uvx` (from [`uv`](https://docs.astral.sh/uv/))
+on `PATH` for the bundled MCP server to launch — see
+[Installation](#installation) for alternatives if you'd rather manage the venv
+yourself and point a client at the console script directly.
+
 ## Development & validation
 
 ```bash
@@ -316,7 +428,9 @@ mkdir -p ~/.claude/skills && cp -r davinci-resolve ~/.claude/skills/davinci-reso
 `tests/test_tool_exposure.py` imports the full server with **no DaVinci Resolve
 instance present and no network access**, and asserts:
 
-- at least 100 tools are registered (the real count is 190 — see the catalog above),
+- at least 100 tools are registered (the real count is 208: 190 live + 18 offline —
+  see the [Tool catalog](#tool-catalog) and [Offline tools](#offline-no-resolve-tools)
+  sections above),
 - every tool name is globally unique,
 - every tool has a non-empty docstring/description,
 - the module-ownership contract holds (e.g. exactly one `detect_scene_cuts`, exactly
