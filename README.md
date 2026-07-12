@@ -141,6 +141,12 @@ yourself at any time to re-verify the live count — no Resolve installation req
 
 ## Installation
 
+> **Want an AI agent (e.g. Claude Code) to set this up for you?** Hand it
+> [`INSTALL.md`](./INSTALL.md) — an imperative, gated setup runbook written for an agent
+> to execute end-to-end (detect OS → install → verify 190 tools offline → enable Resolve
+> scripting → register with your MCP client → live smoke test). The steps below are the
+> same process for a human.
+
 Requirements: Python **3.10+**, and DaVinci Resolve (Studio recommended — some tools
 are Studio-only and degrade to an explanatory error string on the free edition)
 installed locally for actual use. The server itself installs and *starts* fine without
