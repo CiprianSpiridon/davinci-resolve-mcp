@@ -237,6 +237,23 @@ Cursor reads MCP server configuration from `~/.cursor/mcp.json` (global) or
 Reload the MCP servers list in Cursor's settings (or restart Cursor) after adding this,
 then enable the `davinci-resolve` server for the chat/agent you're using.
 
+## Claude Code skill
+
+This repo ships a dedicated **Claude Code skill** at
+[`.claude/skills/davinci-resolve/`](./.claude/skills/davinci-resolve/) that teaches the
+agent *how to operate* the MCP well — the orient→act→verify workflow, a tool-map by task,
+safety around destructive/render operations, screenshot discipline, and quick recipes. It
+auto-loads whenever you run **Claude Code inside this repository**. To make it available in
+every project, copy or symlink the folder into your user skills directory:
+
+```bash
+mkdir -p ~/.claude/skills
+cp -r .claude/skills/davinci-resolve ~/.claude/skills/     # or: ln -s "$PWD/.claude/skills/davinci-resolve" ~/.claude/skills/davinci-resolve
+```
+
+Its `reference/tool-catalog.md` is an exact, auto-generated list of all 190 tools with
+one-line descriptions, grouped by module.
+
 ## Development & validation
 
 ```bash

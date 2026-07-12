@@ -213,6 +213,17 @@ its placeholder path with the real absolute `SERVER` path.
 path, the JSON is valid (`python3 -m json.tool <file>` succeeds), and — for Claude
 Code — `claude mcp list` shows it. Confirm the human restarted the client app.
 
+### 5d — (Claude Code only, optional) install the bundled skill
+
+This repo ships a Claude Code skill at `.claude/skills/davinci-resolve/` that teaches the
+agent how to operate the MCP (workflow, tool map, safety, recipes). It auto-loads when
+Claude Code runs **inside this repo**. To make it available in every project, offer to
+copy it to the user skills dir:
+
+```bash
+mkdir -p ~/.claude/skills && cp -r .claude/skills/davinci-resolve ~/.claude/skills/
+```
+
 ---
 
 ## Phase 6 — Live smoke test *(needs Resolve running)*
