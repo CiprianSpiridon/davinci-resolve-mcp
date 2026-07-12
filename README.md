@@ -152,6 +152,34 @@ are Studio-only and degrade to an explanatory error string on the free edition)
 installed locally for actual use. The server itself installs and *starts* fine without
 Resolve present; tools simply return connection errors until Resolve is running.
 
+### One command (recommended)
+
+From a clone, `install.py` creates the venv, installs the server, and **registers it
+with your MCP clients** automatically (with a backup of any existing config):
+
+```bash
+git clone https://github.com/CiprianSpiridon/davinci-resolve-mcp.git
+cd davinci-resolve-mcp
+python3 install.py                       # venv + install + register all detected clients
+# or target specific clients / preview:
+python3 install.py --clients cursor,claude-code
+python3 install.py --dry-run --clients all
+```
+
+Or via `npx` (thin launcher — the server itself is still Python):
+
+```bash
+npx github:CiprianSpiridon/davinci-resolve-mcp setup      # install + register
+npx github:CiprianSpiridon/davinci-resolve-mcp doctor     # health check
+```
+
+After installing, check health any time with **`davinci-resolve-mcp doctor`** (verifies the
+190 tools register and, if Resolve is running, that a live connection succeeds). The
+`setup`/`doctor` subcommands are also available on the console script directly
+(`davinci-resolve-mcp setup --clients cursor`).
+
+### Manual
+
 ```bash
 git clone https://github.com/CiprianSpiridon/davinci-resolve-mcp.git
 cd davinci-resolve-mcp

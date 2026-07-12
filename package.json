@@ -1,0 +1,35 @@
+{
+  "name": "@ciprianspiridon/davinci-resolve-mcp",
+  "version": "1.0.0",
+  "description": "npx launcher/installer for the davinci-resolve-mcp server (the server itself is Python).",
+  "type": "module",
+  "bin": {
+    "davinci-resolve-mcp": "./bin/davinci-resolve-mcp.mjs"
+  },
+  "files": [
+    "bin/",
+    "install.py",
+    "pyproject.toml",
+    "requirements.txt",
+    "src/**/*.py",
+    "davinci-resolve/**",
+    "README.md",
+    "INSTALL.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "davinci-resolve",
+    "mcp",
+    "model-context-protocol",
+    "installer",
+    "npx"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CiprianSpiridon/davinci-resolve-mcp.git"
+  },
+  "license": "MIT"
+}

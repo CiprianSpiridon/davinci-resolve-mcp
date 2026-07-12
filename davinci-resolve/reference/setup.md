@@ -14,6 +14,11 @@ works even when this skill was installed standalone via `skills add`.
 - Never install outside `.venv`; never disable TLS.
 - Phases 0–3 & 5 work with no Resolve present; only Phase 6 (live check) needs Resolve.
 
+**Fast path:** Phases 1–3 & 5 are automated — from a clone run `python3 install.py
+--clients <clients>` (venv + install + client registration), then `davinci-resolve-mcp
+doctor`. You still do Phase 4 (Resolve GUI) and the client restart by hand. The phases
+below are the manual/controlled version.
+
 ## Phase 0 — Environment
 ```bash
 uname -s 2>/dev/null || echo Windows      # Darwin=macOS, Linux, else Windows

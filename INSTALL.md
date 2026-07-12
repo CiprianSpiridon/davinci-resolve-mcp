@@ -20,6 +20,15 @@ Report what you did and the gate result after each phase.
 - The server is designed to install and start **with no DaVinci Resolve present** — so
   Phases 1–3 and 5 work on any machine; only Phase 6 (live check) needs Resolve running.
 
+## Fast path (one command)
+
+Phases 1–3 and 5 are automated by the bundled installer — from a clone, run
+`python3 install.py --clients <clients>` (it creates the venv, editable-installs, and
+registers the server with the named clients, backing up any existing config), then
+`davinci-resolve-mcp doctor`. You still must do the two human steps (Phase 4: enable
+Resolve External scripting; and restart the client). Use the phase-by-phase flow below
+when you want full control or the one-command path fails.
+
 ---
 
 ## Phase 0 — Detect the environment

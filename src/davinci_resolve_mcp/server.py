@@ -54,14 +54,23 @@ __all__ = ["mcp", "main"]
 
 
 def main() -> None:
-    """Run the DaVinci Resolve MCP server over stdio.
+    """Console-script entry point (``davinci-resolve-mcp``).
 
-    This is the console-script entry point (``davinci-resolve-mcp``,
-    configured in ``pyproject.toml``) as well as the target of
-    ``python -m davinci_resolve_mcp`` / ``python -m
-    davinci_resolve_mcp.server``. It blocks for the lifetime of the
-    server, serving the MCP protocol over stdio.
+    With no arguments, run the MCP server over stdio (blocks for the server's
+    lifetime). The ``setup`` and ``doctor`` subcommands are dispatched to
+    :mod:`davinci_resolve_mcp.installer` instead:
+
+    - ``davinci-resolve-mcp setup [--clients ...] [--dry-run]`` — register this
+      server with your MCP client(s).
+    - ``davinci-resolve-mcp doctor`` — verify the install and Resolve connection.
     """
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] in ("setup", "doctor"):
+        from . import installer
+
+        raise SystemExit(installer.main(sys.argv[1:]))
+
     mcp.run()
 
 
