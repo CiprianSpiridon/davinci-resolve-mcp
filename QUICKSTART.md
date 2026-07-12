@@ -27,7 +27,7 @@ Clone this repository and install it in editable mode into a virtual
 environment:
 
 ```bash
-git clone https://github.com/ciprianspiridon/davinci-resolve-mcp.git
+git clone https://github.com/CiprianSpiridon/davinci-resolve-mcp.git
 cd davinci-resolve-mcp
 python3 -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
@@ -50,8 +50,10 @@ pip install -e ".[transcription]"
 The server auto-detects the standard DaVinci Resolve install locations for
 macOS, Windows, and Linux, so most users don't need to set anything. If your
 install is in a non-standard location, or scripting still isn't connecting,
-copy `.env.example` to `.env` (or export the variables in your shell /
-client config) and fill in the values that apply to your platform:
+set the variables that apply to your platform as real environment variables —
+in the `env` block of your MCP client config (recommended) or your shell. Use
+`.env.example` as a reference for the values; the server reads the process
+environment and does not auto-load a `.env` file:
 
 | Variable | Purpose |
 | --- | --- |

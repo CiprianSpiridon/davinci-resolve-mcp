@@ -179,9 +179,11 @@ server auto-detects the standard per-OS Resolve install paths. See
 | `RESOLVE_SCRIPT_API` | Path to the Resolve `Developer/Scripting` directory (its `Modules` subfolder is added to `sys.path`) | macOS: `/Library/Application Support/Blackmagic Design/DaVinci Resolve/Developer/Scripting` · Windows: `%PROGRAMDATA%\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting` · Linux: `/opt/resolve/Developer/Scripting` |
 | `RESOLVE_MCP_LOG_LEVEL` | Server log verbosity (`DEBUG`/`INFO`/`WARNING`/`ERROR`) — logs go to stderr, never stdout, since stdout carries the MCP protocol stream | `INFO` |
 
-Only set these if your Resolve install lives somewhere non-standard; copy
-`.env.example` to `.env` and uncomment/edit as needed, or export them in your shell /
-MCP client config.
+Only set these if your Resolve install lives somewhere non-standard. Set them as
+real environment variables — the `env` block of your MCP client config (see below)
+is the recommended place, or export them in your shell. `.env.example` lists the
+variables and per-platform defaults for reference; the server reads the process
+environment and does **not** auto-load a `.env` file.
 
 ## Usage with Claude Desktop
 

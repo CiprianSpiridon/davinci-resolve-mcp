@@ -21,6 +21,7 @@ coroutine, via :func:`davinci_resolve_mcp.connection.get_resolve_connection`.
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict
@@ -32,8 +33,13 @@ from .connection import get_resolve_connection
 # ── Logging ──────────────────────────────────────────────────────────────
 # MCP servers speak protocol messages over stdout, so ALL logging must go to
 # stderr — anything written to stdout would corrupt the protocol stream.
+# Level is configurable via RESOLVE_MCP_LOG_LEVEL (DEBUG/INFO/WARNING/ERROR),
+# defaulting to INFO; an unrecognized value falls back to INFO.
+_LOG_LEVEL = getattr(
+    logging, os.getenv("RESOLVE_MCP_LOG_LEVEL", "INFO").upper(), logging.INFO
+)
 logging.basicConfig(
-    level=logging.INFO,
+    level=_LOG_LEVEL,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     stream=sys.stderr,
 )

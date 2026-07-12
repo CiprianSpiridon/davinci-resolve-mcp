@@ -25,18 +25,25 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Local speech-to-text. mlx-whisper is Apple-Silicon only; on other platforms
-# install openai-whisper instead (the transcription module tries both).
+# Local speech-to-text. mlx-whisper is Apple-Silicon only; elsewhere fall back to
+# openai-whisper. transcription_engine tries mlx first, then openai-whisper.
 transcription = [
     "mlx-whisper>=0.4.3; sys_platform == 'darwin'",
+    "openai-whisper>=20231117; sys_platform != 'darwin'",
+]
+# Cross-platform screenshot backend for Windows/Linux (macOS uses the bundled
+# `screencapture` + optional pyobjc-Quartz declared above).
+screenshot = [
+    "mss>=9.0; sys_platform != 'darwin'",
+    "pillow>=10.0; sys_platform != 'darwin'",
 ]
 
 [project.scripts]
 davinci-resolve-mcp = "davinci_resolve_mcp.server:main"
 
 [project.urls]
-Homepage = "https://github.com/ciprianspiridon/davinci-resolve-mcp"
-Repository = "https://github.com/ciprianspiridon/davinci-resolve-mcp"
+Homepage = "https://github.com/CiprianSpiridon/davinci-resolve-mcp"
+Repository = "https://github.com/CiprianSpiridon/davinci-resolve-mcp"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

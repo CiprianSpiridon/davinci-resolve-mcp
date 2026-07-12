@@ -73,7 +73,9 @@ def transcribe_audio(
       accurate), or "turbo" (best speed/quality, default). A full
       HuggingFace repo path also works with the mlx backend.
     - language: language code (e.g. "en", "fr", "de", "ja"). None = auto-detect.
-    - word_timestamps: include word-level timestamps in the output.
+    - word_timestamps: include word-level timestamps. Only available for files
+      short enough to transcribe in a single chunk (<= 5 min); on longer,
+      auto-chunked files word-level data is not stitched back and is omitted.
     - initial_prompt: optional text to guide the model's vocabulary/style.
     """
     try:
@@ -131,6 +133,11 @@ def transcribe_and_add_subtitles(
     the current Resolve timeline (so the transcript is visible/navigable in
     the timeline). Long files are auto-chunked so this works on any length.
 
+    Markers are placed assuming the transcribed audio is aligned with the START
+    of the timeline: a segment at t=0s maps to the timeline's first frame. If the
+    audio you transcribed sits later on the timeline, offset it yourself or use
+    the SRT from export_srt / transcribe_audio and import it as a subtitle track.
+
     Parameters:
     - file_path: absolute path to the audio/video file to transcribe.
     - model: whisper model size ("tiny", "base", "small", "medium",
@@ -154,13 +161,17 @@ def transcribe_and_add_subtitles(
         timeline = _require_timeline(conn)
 
         fps_str = timeline.GetSetting("timelineFrameRate")
-        fps = float(fps_str) if fps_str else 24.0
+        try:
+            fps = float(fps_str) if fps_str else 24.0
+        except (TypeError, ValueError):
+            fps = 24.0
         timeline_start = timeline.GetStartFrame() or 0
 
         added = 0
         for seg in segments:
-            frame_pos = timeline_start + int(seg["start"] * fps)
-            duration_frames = max(1, int((seg["end"] - seg["start"]) * fps))
+            # round() (not int truncation) keeps each marker on its nearest frame.
+            frame_pos = timeline_start + round(seg["start"] * fps)
+            duration_frames = max(1, round((seg["end"] - seg["start"]) * fps))
             text = str(seg["text"]).strip()
 
             if timeline.AddMarker(frame_pos, "Cream", text, text, duration_frames, ""):

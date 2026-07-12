@@ -222,6 +222,11 @@ def create_subtitles_from_audio(
                 "Requires Resolve Studio 19+."
             )
 
+        # Clamp to the documented ranges so an out-of-range value never reaches
+        # Resolve (consistent with audio.set_voice_isolation_state's amount clamp).
+        chars_per_line = max(1, min(60, int(chars_per_line)))
+        gap = max(0, min(10, int(gap)))
+
         settings = {
             subtitle_lang_key: lang_const,
             subtitle_preset_key: preset_const,
