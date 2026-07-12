@@ -114,6 +114,26 @@ exceptions.** Read the returned string and react — never assume success.
   `export_srt`, `list_whisper_models` → `tools/transcription.py` (needs Whisper + ffmpeg).
 - **Uncovered API**: `execute_resolve_code` → `tools/code.py`.
 
+### Offline tools (operate on Resolve FILES + a local SQLite store — **no Resolve needed**)
+These 18 action-dispatch tools each take an `action` param + typed args and work with
+**no running Resolve** (cloud or local). They read/write Resolve's own files and a local
+DB. **Grade/file WRITE actions return `"verified": false`** — they're structurally valid
+but not yet calibrated against a live Resolve panel, so tell the user that before they
+rely on a written `.drx`/`.drp`.
+- **Files**: `drx` (color grades — inspect/decode/export-CDL/attach-LUT/write), `drt`
+  (timelines — parse/author/validate/inject/extract), `drp` (projects — read/author/edit),
+  `offline_fusion` (comps).
+- **Project intelligence**: `project_read` (lint / clip queries), `project_db`
+  (index + `relayout_node_graphs` — tidy node layout, grade bytes preserved),
+  `conform` (relink QC + lineage), `color_trace` (carry grades across a re-conform),
+  `editorial` (changelist / integrity), `media_ingest` (scan → manifest).
+- **Grade/QC compute**: via `drx` actions and the grading cores (CDL ops, white-balance,
+  skin-match, broadcast-legal/gamut `qc`), `deliverable` (compliance QC), `offline_ref`.
+- **Orchestration**: `pipeline` (DB-as-truth: YAML/JSON spec → SQLite → staged runs with
+  gates + provenance + intent-vs-actual drift), `provenance` (audit / episode report),
+  `capabilities` (what's available + dep status + verified/unverified state).
+Full names/actions: [`reference/tool-catalog.md`](./reference/tool-catalog.md).
+
 ## Safety & judgement
 - **`execute_resolve_code` runs arbitrary Python** in Resolve (namespace: `resolve`,
   `project`, `mediaPool`, `timeline`, `mediaStorage`; `print()` or set `result`). Use only
