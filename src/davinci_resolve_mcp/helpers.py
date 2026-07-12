@@ -22,6 +22,35 @@ from .connection import ResolveConnection, get_resolve_connection
 
 _VALID_TRACK_TYPES = ("video", "audio", "subtitle")
 
+# DaVinci Resolve's fixed colour vocabularies. Markers and flags share one set;
+# clip colours are a different set. Used to validate colour arguments before
+# forwarding them to the API (which silently rejects unknown names).
+MARKER_COLORS = (
+    "Blue", "Cyan", "Green", "Yellow", "Red", "Pink", "Purple", "Fuchsia",
+    "Rose", "Lavender", "Sky", "Mint", "Lemon", "Sand", "Cocoa", "Cream",
+)
+FLAG_COLORS = MARKER_COLORS
+CLIP_COLORS = (
+    "Orange", "Apricot", "Yellow", "Lime", "Olive", "Green", "Teal", "Navy",
+    "Blue", "Purple", "Violet", "Pink", "Tan", "Beige", "Brown", "Chocolate",
+)
+
+
+def _check_choice(value: str, valid, label: str):
+    """Validate ``value`` against ``valid`` (case-insensitive).
+
+    Returns ``(canonical, None)`` when it matches — ``canonical`` being the
+    correctly-cased value the API expects — or ``(None, message)`` with an
+    actionable error listing the valid choices when it does not.
+    """
+    if isinstance(value, str):
+        for choice in valid:
+            if value.strip().lower() == choice.lower():
+                return choice, None
+    return None, (
+        f"Invalid {label} '{value}'. Must be one of: {', '.join(valid)}."
+    )
+
 
 def _conn() -> ResolveConnection:
     """Shorthand for :func:`get_resolve_connection`.

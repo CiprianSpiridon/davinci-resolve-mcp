@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 
 from ..app import mcp
-from ..helpers import _conn, _ok, _require_timeline
+from ..helpers import MARKER_COLORS, _check_choice, _conn, _ok, _require_timeline
 
 # ── Markers ──────────────────────────────────────────────────────────────
 
@@ -55,6 +55,9 @@ def add_marker(
       via update_marker_custom_data / get_markers.
     """
     try:
+        color, err = _check_choice(color, MARKER_COLORS, "marker color")
+        if err:
+            return err
         conn = _conn()
         timeline = _require_timeline(conn)
         result = timeline.AddMarker(frame_id, color, name, note, duration, custom_data)
@@ -114,6 +117,9 @@ def delete_markers_by_color(color: str) -> str:
       marker on the timeline.
     """
     try:
+        color, err = _check_choice(color, MARKER_COLORS + ("All",), "marker color")
+        if err:
+            return err
         conn = _conn()
         timeline = _require_timeline(conn)
         if not hasattr(timeline, "DeleteMarkersByColor"):

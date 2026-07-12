@@ -43,7 +43,9 @@ def clip_to_dict_brief(clip) -> dict:
     if isinstance(props, dict):
         for key in ("Duration", "FPS", "Resolution", "File Path", "Clip Color", "Type"):
             value = props.get(key)
-            if value:
+            # Surface any present value, including a legitimately empty string
+            # (e.g. an unset "Clip Color") — only a truly missing key is dropped.
+            if value is not None:
                 result[key.lower().replace(" ", "_")] = value
 
     return result
@@ -287,22 +289,29 @@ def thumbnail_to_png_bytes(thumbnail_data: dict) -> bytes:
     return _encode_png(width, height, raw_rgb)
 
 
-def safe_serialize(obj: Any) -> Any:
+def safe_serialize(obj: Any, _depth: int = 0, _seen: frozenset[int] = frozenset()) -> Any:
     """Recursively coerce *obj* into something json.dumps can handle.
 
     None, bool/int/float/str pass through unchanged. Dicts and lists/tuples
     are recursed into (dict keys are stringified). Anything else (Resolve API
     objects, custom classes, ...) falls back to str(), or a placeholder string
     if even that fails.
+
+    A depth cap and a visited-id set guard against self-referential or
+    pathologically deep structures, so the promised str()/placeholder fallback
+    always wins instead of a RecursionError escaping the function.
     """
     if obj is None:
         return None
     if isinstance(obj, (str, int, float, bool)):
         return obj
-    if isinstance(obj, dict):
-        return {str(k): safe_serialize(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [safe_serialize(item) for item in obj]
+    if isinstance(obj, (dict, list, tuple)):
+        if _depth >= 200 or id(obj) in _seen:
+            return "<circular-or-too-deep>"
+        seen = _seen | {id(obj)}
+        if isinstance(obj, dict):
+            return {str(k): safe_serialize(v, _depth + 1, seen) for k, v in obj.items()}
+        return [safe_serialize(item, _depth + 1, seen) for item in obj]
     try:
         return str(obj)
     except Exception:  # noqa: BLE001

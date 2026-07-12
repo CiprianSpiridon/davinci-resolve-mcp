@@ -69,12 +69,14 @@ def _find_resolve_window_id() -> int | None:
     return None
 
 
-def _capture_macos() -> bytes:
+def _capture_macos(allow_fullscreen_fallback: bool = True) -> bytes:
     """Capture the Resolve window (or full screen as fallback) on macOS.
 
     Returns PNG bytes. Requires the ``screencapture`` CLI (built into
     macOS) and, for window targeting, Screen Recording permission granted
-    to the host application.
+    to the host application. When the Resolve window can't be located and
+    ``allow_fullscreen_fallback`` is False, raises instead of grabbing the
+    whole desktop.
     """
     tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
     tmp.close()
@@ -82,8 +84,15 @@ def _capture_macos() -> bytes:
         wid = _find_resolve_window_id()
         if wid is not None:
             cmd = ["screencapture", "-x", "-l", str(wid), tmp.name]
-        else:
+        elif allow_fullscreen_fallback:
             cmd = ["screencapture", "-x", tmp.name]
+        else:
+            raise RuntimeError(
+                "Could not locate the DaVinci Resolve window and "
+                "allow_fullscreen_fallback is False, so a full-desktop capture "
+                "was declined. Ensure Resolve is running and visible, or pass "
+                "allow_fullscreen_fallback=True to capture the whole screen."
+            )
 
         r = subprocess.run(cmd, capture_output=True)
         if r.returncode != 0:
@@ -104,7 +113,7 @@ def _capture_macos() -> bytes:
             pass
 
 
-def _capture_windows_or_linux() -> bytes:
+def _capture_windows_or_linux(allow_fullscreen_fallback: bool = True) -> bytes:
     """Best-effort full-screen capture on Windows/Linux via the optional
     ``mss`` package, re-encoded to PNG via Pillow.
 
@@ -114,7 +123,17 @@ def _capture_windows_or_linux() -> bytes:
     encoding. Raises ``RuntimeError`` with actionable install instructions
     if either dependency is missing, or if there's no display to capture
     (e.g. a headless Linux session with no X11/Wayland).
+
+    There is no window-scoped capture on these platforms, so the grab always
+    covers the full desktop; when ``allow_fullscreen_fallback`` is False the
+    capture is declined rather than exposing unrelated windows.
     """
+    if not allow_fullscreen_fallback:
+        raise RuntimeError(
+            "Window-scoped capture is not supported on Windows/Linux; only a "
+            "full-desktop grab is possible here. Pass allow_fullscreen_fallback="
+            "True to allow it."
+        )
     try:
         import mss  # type: ignore[import-not-found]
     except ImportError as e:
@@ -152,7 +171,7 @@ def _capture_windows_or_linux() -> bytes:
     return data
 
 
-def _capture_screenshot() -> bytes:
+def _capture_screenshot(allow_fullscreen_fallback: bool = True) -> bytes:
     """Capture the current screen and return PNG bytes, dispatching by OS.
 
     Raises ``RuntimeError`` with a clear, actionable message if the current
@@ -160,29 +179,36 @@ def _capture_screenshot() -> bytes:
     """
     system = platform.system()
     if system == "Darwin":
-        return _capture_macos()
+        return _capture_macos(allow_fullscreen_fallback)
     if system in ("Windows", "Linux"):
-        return _capture_windows_or_linux()
+        return _capture_windows_or_linux(allow_fullscreen_fallback)
     raise RuntimeError(
         f"Screenshot capture is not supported on this platform ({system!r})."
     )
 
 
 @mcp.tool()
-def screenshot() -> Image:
+def screenshot(allow_fullscreen_fallback: bool = True) -> Image:
     """
-    Take a screenshot so you can SEE the current state of the screen
-    (ideally the DaVinci Resolve UI).
+    Take a screenshot so you can SEE the current state of the DaVinci Resolve
+    UI. Useful before/after a visual change, when the user describes something
+    visual, or to verify what's on screen.
 
-    Call this frequently — before and after changes, when the user
-    describes something visual, or whenever you need to visually verify
-    what's on screen.
+    Privacy note: on macOS this targets the Resolve window specifically when it
+    can be located. If it can't (or on Windows/Linux, which have no
+    window-scoped capture), the grab covers the FULL desktop, which may include
+    unrelated or sensitive windows. Set allow_fullscreen_fallback=False to
+    decline a full-desktop capture and get a clear error instead.
+
+    Parameters:
+    - allow_fullscreen_fallback: when True (default) fall back to a full-screen
+      grab if the Resolve window can't be captured on its own; when False,
+      raise rather than capture the whole desktop.
 
     Platform support:
     - macOS: captures the DaVinci Resolve window directly when it can be
-      located (falls back to a full-screen capture otherwise). Requires
-      Screen Recording permission for the host app.
-    - Windows/Linux: best-effort full-screen capture via the optional
+      located. Requires Screen Recording permission for the host app.
+    - Windows/Linux: best-effort full-desktop capture via the optional
       'mss'/'pillow' packages; raises a clear error if they aren't
       installed or no display is available.
 
@@ -190,7 +216,7 @@ def screenshot() -> Image:
     platform/environment has no supported capture backend.
     """
     try:
-        png_data = _capture_screenshot()
+        png_data = _capture_screenshot(allow_fullscreen_fallback)
         if not png_data:
             raise RuntimeError("Screenshot captured but the image was empty.")
         return Image(data=png_data, format="png")

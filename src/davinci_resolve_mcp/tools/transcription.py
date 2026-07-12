@@ -73,9 +73,8 @@ def transcribe_audio(
       accurate), or "turbo" (best speed/quality, default). A full
       HuggingFace repo path also works with the mlx backend.
     - language: language code (e.g. "en", "fr", "de", "ja"). None = auto-detect.
-    - word_timestamps: include word-level timestamps. Only available for files
-      short enough to transcribe in a single chunk (<= 5 min); on longer,
-      auto-chunked files word-level data is not stitched back and is omitted.
+    - word_timestamps: include word-level timestamps in each segment (offsets
+      are stitched correctly across chunks on long files).
     - initial_prompt: optional text to guide the model's vocabulary/style.
     """
     try:
@@ -168,26 +167,46 @@ def transcribe_and_add_subtitles(
         timeline_start = timeline.GetStartFrame() or 0
 
         added = 0
+        skipped = 0
+        used_frames: set[int] = set()
         for seg in segments:
             # round() (not int truncation) keeps each marker on its nearest frame.
             frame_pos = timeline_start + round(seg["start"] * fps)
             duration_frames = max(1, round((seg["end"] - seg["start"]) * fps))
             text = str(seg["text"]).strip()
 
+            # Resolve allows only one marker per frame; two segments that round
+            # to the same frame would collide (AddMarker returns False). Track
+            # collisions explicitly so the count is honest rather than silent.
+            if frame_pos in used_frames:
+                skipped += 1
+                continue
             if timeline.AddMarker(frame_pos, "Cream", text, text, duration_frames, ""):
+                used_frames.add(frame_pos)
                 added += 1
+            else:
+                skipped += 1
 
         srt_content = segments_to_srt(segments)
+
+        note = (
+            f"Added {added} timeline marker(s). "
+            "Use export_srt() to save an SRT file for import as a subtitle track."
+        )
+        if skipped:
+            note += (
+                f" {skipped} segment(s) were skipped because they collided on the "
+                "same timeline frame (Resolve allows one marker per frame) — the "
+                "SRT still contains every segment."
+            )
 
         return json.dumps({
             "language": result.get("language", "unknown"),
             "total_segments": len(segments),
             "markers_added": added,
+            "markers_skipped": skipped,
             "srt_preview": srt_content[:2000],
-            "note": (
-                f"Added {added} timeline marker(s). "
-                "Use export_srt() to save an SRT file for import as a subtitle track."
-            ),
+            "note": note,
         }, indent=2, ensure_ascii=False)
     except ImportError:
         return _INSTALL_HINT

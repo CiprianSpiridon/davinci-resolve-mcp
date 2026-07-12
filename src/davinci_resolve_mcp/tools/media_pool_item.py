@@ -23,7 +23,15 @@ from __future__ import annotations
 import json
 
 from ..app import mcp
-from ..helpers import _coerce_value, _conn, _ok
+from ..helpers import (
+    CLIP_COLORS,
+    FLAG_COLORS,
+    MARKER_COLORS,
+    _check_choice,
+    _coerce_value,
+    _conn,
+    _ok,
+)
 
 
 def _find_clip(clip_name: str):
@@ -216,6 +224,9 @@ def add_clip_marker(
       via the marker's custom data field.
     """
     try:
+        color, err = _check_choice(color, MARKER_COLORS, "marker color")
+        if err:
+            return err
         clip = _find_clip(clip_name)
         if not hasattr(clip, "AddMarker"):
             return "Error: AddMarker is not available on this clip object."
@@ -241,6 +252,9 @@ def delete_clip_markers_by_color(clip_name: str, color: str) -> str:
       marker on the clip.
     """
     try:
+        color, err = _check_choice(color, MARKER_COLORS + ("All",), "marker color")
+        if err:
+            return err
         clip = _find_clip(clip_name)
         if not hasattr(clip, "DeleteMarkersByColor"):
             return "Error: DeleteMarkersByColor is not available on this clip object."
@@ -313,6 +327,9 @@ def add_clip_flag(clip_name: str, color: str) -> str:
       "Lemon", "Sand", "Cocoa", "Cream".
     """
     try:
+        color, err = _check_choice(color, FLAG_COLORS, "flag color")
+        if err:
+            return err
         clip = _find_clip(clip_name)
         if not hasattr(clip, "AddFlag"):
             return "Error: AddFlag is not available on this clip object."
@@ -337,6 +354,9 @@ def clear_clip_flags(clip_name: str, color: str = "All") -> str:
       the clip.
     """
     try:
+        color, err = _check_choice(color, FLAG_COLORS + ("All",), "flag color")
+        if err:
+            return err
         clip = _find_clip(clip_name)
         if not hasattr(clip, "ClearFlags"):
             return "Error: ClearFlags is not available on this clip object."
@@ -387,6 +407,9 @@ def set_clip_color(clip_name: str, color: str) -> str:
       "Beige", "Brown", "Chocolate".
     """
     try:
+        color, err = _check_choice(color, CLIP_COLORS, "clip color")
+        if err:
+            return err
         clip = _find_clip(clip_name)
         if not hasattr(clip, "SetClipColor"):
             return "Error: SetClipColor is not available on this clip object."

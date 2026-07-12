@@ -163,10 +163,20 @@ class ResolveConnection:
         script_lib = os.environ.get("RESOLVE_SCRIPT_LIB")
         if not script_lib:
             candidate = defaults["script_lib"]
+            # Export the platform default unconditionally (mirroring
+            # RESOLVE_SCRIPT_API below) so fusionscript always has a path to
+            # load; warn rather than stay silent if the default is absent.
+            os.environ["RESOLVE_SCRIPT_LIB"] = candidate
+            script_lib = candidate
             if os.path.exists(candidate):
-                os.environ["RESOLVE_SCRIPT_LIB"] = candidate
-                script_lib = candidate
                 logger.info("Auto-configured RESOLVE_SCRIPT_LIB=%s", candidate)
+            else:
+                logger.warning(
+                    "Auto-configured RESOLVE_SCRIPT_LIB=%s, but that file does "
+                    "not exist. Set RESOLVE_SCRIPT_LIB if Resolve is installed "
+                    "in a non-standard location.",
+                    candidate,
+                )
 
         script_api = os.environ.get("RESOLVE_SCRIPT_API")
         if not script_api:
@@ -356,6 +366,10 @@ class ResolveConnection:
 # ── Module-level singleton ───────────────────────────────────────────────
 
 _connection: Optional[ResolveConnection] = None
+# Guards creation/replacement of the singleton. FastMCP runs sync tool bodies
+# on an anyio worker-thread pool, so two tool calls can enter here at once; the
+# lock prevents a lost update / duplicate connect on the shared global.
+_connection_lock = threading.Lock()
 
 
 def get_resolve_connection() -> ResolveConnection:
@@ -371,20 +385,27 @@ def get_resolve_connection() -> ResolveConnection:
     """
     global _connection
 
-    if _connection is not None and _connection.is_alive():
+    # Fast path: reuse a live connection without taking the lock.
+    conn = _connection
+    if conn is not None and conn.is_alive():
+        return conn
+
+    # Slow path: create/replace under the lock (double-checked).
+    with _connection_lock:
+        if _connection is not None and _connection.is_alive():
+            return _connection
+
+        if _connection is not None:
+            logger.warning("Resolve connection is stale; reconnecting...")
+
+        candidate = ResolveConnection()
+        if not candidate.connect():
+            _connection = None
+            raise ConnectionError(
+                "Could not connect to DaVinci Resolve. Make sure Resolve is "
+                "running and that external scripting is enabled in "
+                "Preferences > General > External scripting using."
+            )
+
+        _connection = candidate
         return _connection
-
-    if _connection is not None:
-        logger.warning("Resolve connection is stale; reconnecting...")
-
-    candidate = ResolveConnection()
-    if not candidate.connect():
-        _connection = None
-        raise ConnectionError(
-            "Could not connect to DaVinci Resolve. Make sure Resolve is "
-            "running and that external scripting is enabled in "
-            "Preferences > General > External scripting using."
-        )
-
-    _connection = candidate
-    return _connection

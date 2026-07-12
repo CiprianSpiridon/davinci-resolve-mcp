@@ -50,7 +50,15 @@ from __future__ import annotations
 import json
 
 from ..app import mcp
-from ..helpers import _coerce_value, _conn, _get_timeline_item, _ok
+from ..helpers import (
+    CLIP_COLORS,
+    MARKER_COLORS,
+    _check_choice,
+    _coerce_value,
+    _conn,
+    _get_timeline_item,
+    _ok,
+)
 from ..resolve_utils import timeline_item_to_dict_full
 
 
@@ -201,6 +209,9 @@ def add_item_marker(
     - item_index: 0-based index of the item within that track's item list.
     """
     try:
+        color, err = _check_choice(color, MARKER_COLORS, "marker color")
+        if err:
+            return err
         item = _get_timeline_item(track_type, track_index, item_index)
         result = item.AddMarker(frame_id, color, name, note, duration, custom_data)
         return _ok(
@@ -286,6 +297,9 @@ def set_item_clip_color(
     - item_index: 0-based index of the item within that track's item list.
     """
     try:
+        color, err = _check_choice(color, CLIP_COLORS, "clip color")
+        if err:
+            return err
         item = _get_timeline_item(track_type, track_index, item_index)
         result = item.SetClipColor(color)
         return _ok(

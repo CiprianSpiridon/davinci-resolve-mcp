@@ -223,6 +223,8 @@ def set_render_mode(mode: int) -> str:
     - mode: 0 for "Individual clips", 1 for "Single clip" (whole timeline).
     """
     try:
+        if mode not in (0, 1):
+            return f"Invalid mode {mode!r}. Must be 0 (Individual clips) or 1 (Single clip)."
         project = _project()
         if not hasattr(project, "SetCurrentRenderMode"):
             return "SetCurrentRenderMode is not available in this Resolve version."

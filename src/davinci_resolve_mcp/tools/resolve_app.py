@@ -281,6 +281,8 @@ def set_keyframe_mode(mode: int) -> str:
     - mode: integer keyframe mode (0=All, 1=Color, 2=Sizing).
     """
     try:
+        if mode not in (0, 1, 2):
+            return f"Invalid mode {mode!r}. Must be 0 (All), 1 (Color), or 2 (Sizing)."
         resolve = _conn().get_resolve()
         if not hasattr(resolve, "SetKeyframeMode"):
             return "Error: SetKeyframeMode is not available on this Resolve object."

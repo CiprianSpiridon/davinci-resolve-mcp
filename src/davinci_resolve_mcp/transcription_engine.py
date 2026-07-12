@@ -22,6 +22,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("davinci_resolve_mcp.transcription_engine")
@@ -45,9 +46,17 @@ DEFAULT_MODEL = "turbo"
 # never risks tripping an MCP client's request timeout.
 CHUNK_SECONDS = 300  # 5 minutes
 
+# Each chunk is extended by this many seconds past its logical end so a word
+# spoken across a boundary is captured intact in the earlier chunk. Segments
+# that land in the overlap region are de-duplicated during stitching.
+CHUNK_OVERLAP_SECONDS = 5.0
+
 # Cache of loaded openai-whisper model objects, keyed by model name, so
 # repeated transcribe() calls in the same process don't reload weights.
+# Guarded by a lock so two concurrent transcribe() calls can't both miss the
+# cache and load the same (large) model twice.
 _openai_model_cache: Dict[str, Any] = {}
+_openai_model_lock = threading.Lock()
 
 
 # ── Backend selection ───────────────────────────────────────────────────
@@ -115,6 +124,26 @@ def _resolve_model_name(model: str, backend: str) -> str:
 
 # ── ffmpeg helpers ──────────────────────────────────────────────────────
 
+def _run(cmd: List[str], what: str) -> "subprocess.CompletedProcess[str]":
+    """Run an ffmpeg/ffprobe command, surfacing its stderr on failure.
+
+    ``subprocess``'s own ``CalledProcessError`` message omits the captured
+    stderr, which is exactly where ffmpeg explains what went wrong — so we
+    re-raise with the tail of stderr included and an actionable hint.
+    """
+    try:
+        return subprocess.run(cmd, capture_output=True, check=True, text=True)
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"{what} failed: '{cmd[0]}' not found. Install ffmpeg and ensure it is "
+            f"on PATH (brew install ffmpeg / apt install ffmpeg)."
+        ) from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        tail = stderr[-800:] if stderr else "(no stderr captured)"
+        raise RuntimeError(f"{what} failed (exit {exc.returncode}):\n{tail}") from exc
+
+
 def _get_duration(path: str) -> float:
     """Get duration in seconds via ffprobe."""
     cmd = [
@@ -123,8 +152,13 @@ def _get_duration(path: str) -> float:
         "-of", "csv=p=0",
         path,
     ]
-    out = subprocess.check_output(cmd, text=True).strip()
-    return float(out)
+    out = _run(cmd, "ffprobe (reading duration)").stdout.strip()
+    try:
+        return float(out)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"ffprobe returned an unparseable duration for '{path}': {out!r}"
+        ) from exc
 
 
 def _extract_chunk(src: str, start: float, duration: float, dst: str) -> None:
@@ -140,18 +174,27 @@ def _extract_chunk(src: str, start: float, duration: float, dst: str) -> None:
         "-ac", "1",           # mono
         dst,
     ]
-    subprocess.run(cmd, capture_output=True, check=True)
+    _run(cmd, f"ffmpeg (extracting chunk at {start:.0f}s)")
 
 
-def _split_audio(path: str, chunk_sec: int, tmp_dir: str) -> List[Dict[str, Any]]:
-    """Split into <=chunk_sec WAV files. Returns list of {path, offset}."""
+def _split_audio(
+    path: str, chunk_sec: int, tmp_dir: str, overlap_sec: float = CHUNK_OVERLAP_SECONDS
+) -> List[Dict[str, Any]]:
+    """Split into WAV files. Returns list of {path, offset}.
+
+    Each chunk advances by ``chunk_sec`` but is extracted ``overlap_sec``
+    longer, so a word spoken across a boundary is captured whole in the
+    earlier chunk. The stitching step de-duplicates the overlap region.
+    """
     total = _get_duration(path)
     chunks: List[Dict[str, Any]] = []
     offset = 0.0
     idx = 0
     while offset < total:
         chunk_path = os.path.join(tmp_dir, f"chunk_{idx:04d}.wav")
-        _extract_chunk(path, offset, chunk_sec, chunk_path)
+        # Extend by the overlap unless this is the final chunk.
+        extract_len = chunk_sec + (overlap_sec if offset + chunk_sec < total else 0.0)
+        _extract_chunk(path, offset, extract_len, chunk_path)
         chunks.append({"path": chunk_path, "offset": offset})
         offset += chunk_sec
         idx += 1
@@ -161,10 +204,18 @@ def _split_audio(path: str, chunk_sec: int, tmp_dir: str) -> List[Dict[str, Any]
 # ── Per-backend single-file transcription ───────────────────────────────
 
 def _get_openai_model(module: Any, model_name: str) -> Any:
-    if model_name not in _openai_model_cache:
-        logger.info("Loading openai-whisper model '%s' (first use downloads it)...", model_name)
-        _openai_model_cache[model_name] = module.load_model(model_name)
-    return _openai_model_cache[model_name]
+    # Double-checked locking: fast path avoids the lock once cached; the lock
+    # ensures two concurrent first-use calls don't both load the same weights.
+    cached = _openai_model_cache.get(model_name)
+    if cached is not None:
+        return cached
+    with _openai_model_lock:
+        cached = _openai_model_cache.get(model_name)
+        if cached is None:
+            logger.info("Loading openai-whisper model '%s' (first use downloads it)...", model_name)
+            cached = module.load_model(model_name)
+            _openai_model_cache[model_name] = cached
+        return cached
 
 
 def _transcribe_chunk(
@@ -263,7 +314,14 @@ def transcribe(
         all_segments: List[Dict[str, Any]] = []
         all_text_parts: List[str] = []
         detected_language: Optional[str] = None
-        prompt = initial_prompt
+        # Language actually used per chunk: after the first chunk auto-detects,
+        # pin it for the rest so every chunk is transcribed in the same language
+        # (avoids per-chunk re-detection flapping between languages).
+        effective_language = language
+        rolling_context = ""
+        # Absolute seconds already covered by an emitted segment; segments in the
+        # next chunk's overlap region that start before this are dropped.
+        covered_until = 0.0
 
         for i, chunk in enumerate(chunks):
             logger.info(
@@ -271,28 +329,49 @@ def transcribe(
                 i + 1, len(chunks), chunk["offset"],
             )
 
+            # Keep the caller's initial_prompt as a stable prefix on every chunk,
+            # then append the tail of the previous chunk's text for continuity —
+            # so the caller's vocabulary/style hint is never lost after chunk 0.
+            prompt = " ".join(p for p in (initial_prompt, rolling_context) if p) or None
+
             result = _transcribe_chunk(
-                backend, module, chunk["path"], model_name, language, word_timestamps, prompt
+                backend, module, chunk["path"], model_name,
+                effective_language, word_timestamps, prompt,
             )
 
             if detected_language is None:
                 detected_language = result.get("language")
+                if effective_language is None:
+                    effective_language = detected_language
 
             offset = chunk["offset"]
             for seg in result.get("segments", []):
-                all_segments.append({
-                    "start": seg["start"] + offset,
-                    "end": seg["end"] + offset,
+                abs_start = seg["start"] + offset
+                abs_end = seg["end"] + offset
+                # Skip segments already covered by the previous chunk's overlap.
+                if i > 0 and abs_start < covered_until - 0.1:
+                    continue
+                out_seg: Dict[str, Any] = {
+                    "start": abs_start,
+                    "end": abs_end,
                     "text": seg["text"],
-                })
+                }
+                words = seg.get("words")
+                if word_timestamps and words:
+                    out_seg["words"] = [
+                        {**w,
+                         "start": w["start"] + offset,
+                         "end": w["end"] + offset}
+                        for w in words
+                        if w.get("start") is not None and w.get("end") is not None
+                    ]
+                all_segments.append(out_seg)
+                covered_until = max(covered_until, abs_end)
 
             text = result.get("text", "")
             if text:
                 all_text_parts.append(text.strip())
-                # Use the tail of the last chunk's text as prompt for the
-                # next chunk to maintain context continuity across chunk
-                # boundaries.
-                prompt = text.strip()[-200:]
+                rolling_context = text.strip()[-200:]
 
         return {
             "language": detected_language or "unknown",
