@@ -133,7 +133,13 @@ def wb_from_patch(
         "target": <target luma the patch was neutralized to>,
         "clipped": {"r":bool, "g":bool, "b":bool},
         "correction_pct": <max |gain-1| across channels, as a percentage>,
+        "verified": False,
       }
+
+    ``verified`` is always False: this is structural grade math on a caller-
+    supplied patch sample, not calibrated against a live Resolve render (see
+    the offline/advanced tool set's WRITE-action convention, matching
+    :mod:`davinci_resolve_mcp.grading.cdl_ops`).
 
     An already-neutral patch (R == G == B) returns gain == {1,1,1} (identity
     CDL). Never raises for a clipped patch (0 or white_point in any channel)
@@ -162,6 +168,7 @@ def wb_from_patch(
         "target": target,
         "clipped": clipped,
         "correction_pct": _correction_pct(gain),
+        "verified": False,
     }
 
 
@@ -186,7 +193,11 @@ def wb_match_to_reference(
 
     Returns the same shape as wb_from_patch, plus "reference" (the parsed
     reference patch) and "target" set per-channel to the reference patch
-    (unlike wb_from_patch's single scalar target luma). A patch that already
+    (unlike wb_from_patch's single scalar target luma). As with
+    wb_from_patch, "verified" is always False — structural grade math, not
+    calibrated against a live Resolve render (see the offline/advanced tool
+    set's WRITE-action convention, matching
+    :mod:`davinci_resolve_mcp.grading.cdl_ops`). A patch that already
     matches the reference returns gain == {1,1,1} (identity CDL). Clipped
     channels — on either the patch or the reference — are flagged in
     "clipped" and floored rather than dividing by (near) zero.
@@ -216,4 +227,5 @@ def wb_match_to_reference(
         "target": dict(reference),
         "clipped": clipped,
         "correction_pct": _correction_pct(gain),
+        "verified": False,
     }
