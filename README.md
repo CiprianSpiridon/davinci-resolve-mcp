@@ -239,20 +239,31 @@ then enable the `davinci-resolve` server for the chat/agent you're using.
 
 ## Claude Code skill
 
-This repo ships a dedicated **Claude Code skill** at
-[`.claude/skills/davinci-resolve/`](./.claude/skills/davinci-resolve/) that teaches the
-agent *how to operate* the MCP well — the orient→act→verify workflow, a tool-map by task,
-safety around destructive/render operations, screenshot discipline, and quick recipes. It
-auto-loads whenever you run **Claude Code inside this repository**. To make it available in
-every project, copy or symlink the folder into your user skills directory:
+This repo ships a dedicated **Claude Code skill** — the canonical source is the
+root-level [`davinci-resolve/`](./davinci-resolve/) folder (`davinci-resolve/SKILL.md`),
+mirrored into [`.claude/skills/davinci-resolve`](./.claude/skills/) via a symlink so it
+**auto-loads whenever you run Claude Code inside this repository**.
+
+The skill covers the MCP end to end: **onboarding** (it walks Claude Code through
+installing and registering the MCP if it isn't configured yet — see
+[`davinci-resolve/reference/setup.md`](./davinci-resolve/reference/setup.md)) and
+**operation** (the orient→act→verify workflow, a tool-map by task, safety around
+destructive/render ops, screenshot discipline, and quick recipes). Its
+[`reference/tool-catalog.md`](./davinci-resolve/reference/tool-catalog.md) is an exact,
+auto-generated list of all 190 tools grouped by module.
+
+**Install it in any project** with the [skills.sh](https://skills.sh) CLI — the repo is
+discoverable (the skill lives at the repo root):
 
 ```bash
-mkdir -p ~/.claude/skills
-cp -r .claude/skills/davinci-resolve ~/.claude/skills/     # or: ln -s "$PWD/.claude/skills/davinci-resolve" ~/.claude/skills/davinci-resolve
+npx skills add CiprianSpiridon/davinci-resolve-mcp
 ```
 
-Its `reference/tool-catalog.md` is an exact, auto-generated list of all 190 tools with
-one-line descriptions, grouped by module.
+Or copy it into your user skills directory manually:
+
+```bash
+mkdir -p ~/.claude/skills && cp -r davinci-resolve ~/.claude/skills/
+```
 
 ## Development & validation
 

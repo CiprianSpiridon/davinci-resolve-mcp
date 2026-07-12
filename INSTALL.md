@@ -215,13 +215,15 @@ Code — `claude mcp list` shows it. Confirm the human restarted the client app.
 
 ### 5d — (Claude Code only, optional) install the bundled skill
 
-This repo ships a Claude Code skill at `.claude/skills/davinci-resolve/` that teaches the
-agent how to operate the MCP (workflow, tool map, safety, recipes). It auto-loads when
-Claude Code runs **inside this repo**. To make it available in every project, offer to
-copy it to the user skills dir:
+This repo ships a Claude Code skill (canonical source: root-level `davinci-resolve/`,
+symlinked into `.claude/skills/`) that teaches the agent how to set up **and** operate the
+MCP. It auto-loads when Claude Code runs **inside this repo**. To make it available in
+every project, install it via [skills.sh](https://skills.sh) (the skill is discoverable at
+the repo root):
 
 ```bash
-mkdir -p ~/.claude/skills && cp -r .claude/skills/davinci-resolve ~/.claude/skills/
+npx skills add CiprianSpiridon/davinci-resolve-mcp
+# or copy manually: mkdir -p ~/.claude/skills && cp -r davinci-resolve ~/.claude/skills/
 ```
 
 ---

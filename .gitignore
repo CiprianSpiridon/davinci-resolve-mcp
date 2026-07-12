@@ -31,7 +31,9 @@ htmlcov/
 .claude/*
 !.claude/skills/
 .claude/skills/*
-!.claude/skills/davinci-resolve/
+# Ship the symlink that mirrors this project's own skill into the Claude Code
+# skills dir (canonical source is the root-level davinci-resolve/ skill).
+!.claude/skills/davinci-resolve
 skills-lock.json
 
 # Workflow runtime status (keep .ulpi/plans/ tracked — it is a deliverable)
