@@ -134,9 +134,10 @@ Optionally run the test suite (installs `pytest` into the venv if missing):
 ./.venv/bin/pip install pytest -q && ./.venv/bin/pytest -q
 ```
 
-**Gate 3:** the snippet prints `OK: 190 tools, 3 resources, all names unique` (the count
-must be ≥ 100; 190 is expected). If it errors on import, the install is broken — see
-Troubleshooting; do not proceed to register a broken server.
+**Gate 3:** the snippet prints `OK: 208 tools, 3 resources, all names unique` (the count
+must be ≥ 100; 208 is expected — 190 live Resolve tools + 18 offline file tools). If it
+errors on import, the install is broken — see Troubleshooting; do not proceed to register
+a broken server.
 
 ---
 
@@ -286,7 +287,7 @@ project data.**
 ## What "done" looks like (report this back to the user)
 
 - Repo at `<absolute path>`, virtualenv installed, `davinci-resolve-mcp` binary present.
-- Offline gate: **190 tools, 3 resources, unique names** (Phase 3).
+- Offline gate: **208 tools, 3 resources, unique names** (Phase 3).
 - Server registered with `<client>` using the absolute binary path.
 - Reminder to the user: External scripting must be `Local` and Resolve must be running
   for tools to act; the server is **Studio-oriented** (free edition degrades gracefully).
