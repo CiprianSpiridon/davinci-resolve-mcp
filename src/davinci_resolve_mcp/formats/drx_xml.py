@@ -49,6 +49,15 @@ __all__ = [
 _FRAME_ZSTD = 0x81
 _FRAME_STORED = 0x80
 
+# Real DaVinci Resolve .drx files use C++-namespaced element names
+# (``Gallery::GyStill``, ``ListMgt::LmVersion``). Python's xml.etree treats
+# ``::`` as an (invalid) namespace separator and refuses to parse. Since ``::``
+# only ever appears inside element tag names in these documents (never in
+# attribute values, comments, or the hex/base64 blob payloads), we transform it
+# to a reversible sentinel around ElementTree, and restore the real ``::`` on
+# serialize — so fixtures stay byte-exact and written .drx re-import into Resolve.
+_NS_TOKEN = "__DRXNS__"
+
 
 class DrxParseError(Exception):
     """Raised when a ``.drx`` document cannot be parsed as a grade envelope."""
@@ -350,6 +359,11 @@ def parse_drx_content(xml: str) -> Dict[str, Any]:
         except Exception as e:  # noqa: BLE001
             raise DrxParseError(f"drx content is not decodable text: {e}") from e
 
+    # Make the real ``Gallery::GyStill`` schema parseable by ElementTree. All
+    # downstream processing (tree, prolog/epilog, node scan) runs on this
+    # token form; serialize_drx() restores the literal ``::`` before emitting.
+    xml = xml.replace("::", _NS_TOKEN)
+
     try:
         root = ET.fromstring(xml)
     except ET.ParseError as e:
@@ -358,7 +372,8 @@ def parse_drx_content(xml: str) -> Dict[str, Any]:
     if not _is_still(root.tag):
         raise DrxParseError(
             f"not a .drx grade envelope: root element is "
-            f"<{_localname(root.tag)}>, expected <Gallery_GyStill>"
+            f"<{_localname(root.tag).replace(_NS_TOKEN, '::')}>, "
+            f"expected <Gallery::GyStill>"
         )
 
     # All stills in the document (root is one; be tolerant of nested siblings).
@@ -422,4 +437,6 @@ def serialize_drx(parsed: Dict[str, Any]) -> str:
 
     prolog = parsed.get("_prolog") or ""
     epilog = parsed.get("_epilog") or ""
-    return prolog + _node_to_xml(tree) + epilog
+    # Restore the literal ``::`` namespaced tag names so the emitted .drx is a
+    # real DaVinci Resolve document (importable), not the internal token form.
+    return (prolog + _node_to_xml(tree) + epilog).replace(_NS_TOKEN, "::")
