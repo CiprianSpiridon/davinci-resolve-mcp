@@ -1,7 +1,7 @@
 {
   "name": "@ciprianspiridon/davinci-resolve-mcp",
   "version": "1.0.0",
-  "description": "npx launcher/installer for the davinci-resolve-mcp server (the server itself is Python).",
+  "description": "npm distribution + one-command installer for davinci-resolve-mcp. The MCP server itself is Python; this package is a thin bootstrapper so people can discover it on npm and run `npx … setup` without cloning.",
   "type": "module",
   "bin": {
     "davinci-resolve-mcp": "./bin/davinci-resolve-mcp.mjs"
@@ -24,12 +24,16 @@
     "davinci-resolve",
     "mcp",
     "model-context-protocol",
+    "mcp-server",
     "installer",
-    "npx"
+    "npx",
+    "video-editing",
+    "color-grading"
   ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/CiprianSpiridon/davinci-resolve-mcp.git"
   },
+  "homepage": "https://github.com/CiprianSpiridon/davinci-resolve-mcp#readme",
   "license": "MIT"
 }

@@ -222,18 +222,22 @@ its placeholder path with the real absolute `SERVER` path.
 path, the JSON is valid (`python3 -m json.tool <file>` succeeds), and — for Claude
 Code — `claude mcp list` shows it. Confirm the human restarted the client app.
 
-### 5d — (Claude Code only, optional) install the bundled skill
+### 5d — install the bundled agent skill GLOBALLY (Claude Code + Cowork)
 
-This repo ships a Claude Code skill (canonical source: root-level `davinci-resolve/`,
-symlinked into `.claude/skills/`) that teaches the agent how to set up **and** operate the
-MCP. It auto-loads when Claude Code runs **inside this repo**. To make it available in
-every project, install it via [skills.sh](https://skills.sh) (the skill is discoverable at
-the repo root):
+This repo ships an agent skill (canonical source: root-level `davinci-resolve/`, symlinked
+into `.claude/skills/`) that teaches the agent how to set up **and** operate the MCP. It
+auto-loads when Claude Code runs **inside this repo**, but to make it available everywhere
+— **Claude Code and Claude Cowork both read `~/.claude/skills/`** — install it **globally**
+for all agents:
 
 ```bash
-npx skills add CiprianSpiridon/davinci-resolve-mcp
-# or copy manually: mkdir -p ~/.claude/skills && cp -r davinci-resolve ~/.claude/skills/
+npx skills add CiprianSpiridon/davinci-resolve-mcp --global --agent '*' -y
+# manual equivalent (Claude Code + Cowork both read this dir):
+mkdir -p ~/.claude/skills && cp -r davinci-resolve ~/.claude/skills/davinci-resolve
 ```
+
+Do this as part of onboarding so the user gets the skill in Cowork too, not just when
+they're inside the repo with Claude Code.
 
 ---
 

@@ -166,11 +166,21 @@ python3 install.py --clients cursor,claude-code
 python3 install.py --dry-run --clients all
 ```
 
-Or via `npx` (thin launcher — the server itself is still Python):
+Prefer not to clone? Install straight from Git, then run `setup`:
 
 ```bash
-npx github:CiprianSpiridon/davinci-resolve-mcp setup      # install + register
-npx github:CiprianSpiridon/davinci-resolve-mcp doctor     # health check
+pipx install "git+https://github.com/CiprianSpiridon/davinci-resolve-mcp.git"
+# or: pip install "git+https://github.com/CiprianSpiridon/davinci-resolve-mcp.git"
+davinci-resolve-mcp setup --clients cursor,claude-code
+```
+
+Or via **npx** (the package is published to npm as a discovery + no-clone installer; the
+server itself is still Python, so you need Python 3.10+ installed):
+
+```bash
+npx @ciprianspiridon/davinci-resolve-mcp setup       # install + register
+npx @ciprianspiridon/davinci-resolve-mcp doctor      # health check
+# from the repo without npm publish: npx github:CiprianSpiridon/davinci-resolve-mcp setup
 ```
 
 After installing, check health any time with **`davinci-resolve-mcp doctor`** (verifies the
@@ -265,32 +275,35 @@ Cursor reads MCP server configuration from `~/.cursor/mcp.json` (global) or
 Reload the MCP servers list in Cursor's settings (or restart Cursor) after adding this,
 then enable the `davinci-resolve` server for the chat/agent you're using.
 
-## Claude Code skill
+## Agent skill (Claude Code, Cowork, and more)
 
-This repo ships a dedicated **Claude Code skill** — the canonical source is the
-root-level [`davinci-resolve/`](./davinci-resolve/) folder (`davinci-resolve/SKILL.md`),
-mirrored into [`.claude/skills/davinci-resolve`](./.claude/skills/) via a symlink so it
-**auto-loads whenever you run Claude Code inside this repository**.
+This repo ships a dedicated **agent skill** — the canonical source is the root-level
+[`davinci-resolve/`](./davinci-resolve/) folder (`davinci-resolve/SKILL.md`), mirrored
+into [`.claude/skills/davinci-resolve`](./.claude/skills/) via a symlink so it
+**auto-loads whenever you run Claude Code inside this repository**. It works with any
+agent that loads skills — **Claude Code and Claude Cowork** both read from the same
+`~/.claude/skills/` directory, so a global install lights it up in both.
 
-The skill covers the MCP end to end: **onboarding** (it walks Claude Code through
-installing and registering the MCP if it isn't configured yet — see
+The skill covers the MCP end to end: **onboarding** (it walks the agent through installing
+and registering the MCP if it isn't configured yet — see
 [`davinci-resolve/reference/setup.md`](./davinci-resolve/reference/setup.md)) and
 **operation** (the orient→act→verify workflow, a tool-map by task, safety around
 destructive/render ops, screenshot discipline, and quick recipes). Its
 [`reference/tool-catalog.md`](./davinci-resolve/reference/tool-catalog.md) is an exact,
-auto-generated list of all 190 tools grouped by module.
+auto-generated list of every tool grouped by module.
 
-**Install it in any project** with the [skills.sh](https://skills.sh) CLI — the repo is
-discoverable (the skill lives at the repo root):
+**Install it globally** (available in Claude Code, Cowork, and every other agent) with the
+[skills.sh](https://skills.sh) CLI — the repo is discoverable (the skill lives at the repo
+root):
 
 ```bash
-npx skills add CiprianSpiridon/davinci-resolve-mcp
+npx skills add CiprianSpiridon/davinci-resolve-mcp --global --agent '*' -y
 ```
 
-Or copy it into your user skills directory manually:
+Or copy it into the global skills directory manually (Claude Code + Cowork both read this):
 
 ```bash
-mkdir -p ~/.claude/skills && cp -r davinci-resolve ~/.claude/skills/
+mkdir -p ~/.claude/skills && cp -r davinci-resolve ~/.claude/skills/davinci-resolve
 ```
 
 ## Development & validation
