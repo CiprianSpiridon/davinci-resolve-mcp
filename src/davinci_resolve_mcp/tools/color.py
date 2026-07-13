@@ -1266,3 +1266,277 @@ def rename_gallery_album(
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
+
+
+# ── Stills within a still album ──────────────────────────────────────────
+#
+# A GalleryStill is an opaque handle with no methods of its own — it's only
+# ever a parameter to GalleryStillAlbum methods. This repo has no object-id
+# registry, so a still is addressed by its 0-based index into the ordered
+# registry). Every tool re-fetches that list so an index always refers to
+# the album's current contents.
+
+_STILL_EXPORT_FORMATS = (
+    "dpx", "cin", "tif", "jpg", "png", "ppm", "bmp", "xpm", "drx",
+)
+
+
+def _resolve_still_album(gallery, album_name: str):
+    """Resolve a still album by name and return ``(album, stills, error)``.
+
+    ``stills`` is the ordered list from ``album.GetStills()`` (possibly
+    empty). On failure ``album``/``stills`` are ``None`` and ``error`` is an
+    actionable "album not found" message listing the available still album
+    names — callers return that string instead of raising.
+    """
+    albums = _gallery_albums(gallery, "still")
+    album = _find_album_by_name(gallery, albums, album_name)
+    if album is None:
+        available = [gallery.GetAlbumName(a) for a in albums]
+        return None, None, (
+            f"Still album '{album_name}' not found. Available still "
+            f"albums: {', '.join(available) if available else '(none)'}."
+        )
+    stills = album.GetStills()
+    return album, (list(stills) if stills else []), None
+
+
+def _stills_at_indices(stills, indices):
+    """Return ``(selected, error)`` for the 0-based ``indices`` into ``stills``.
+
+    Validates every index up front and returns a clear out-of-range message
+    (never raising) if any index falls outside the album, so an out-of-range
+    request never touches the underlying Resolve API.
+    """
+    n = len(stills)
+    selected = []
+    for idx in indices:
+        if idx < 0 or idx >= n:
+            if n:
+                return None, (
+                    f"Still index {idx} out of range — album has {n} "
+                    f"still(s) (0-{n - 1})."
+                )
+            return None, (
+                f"Still index {idx} out of range — album has no stills."
+            )
+        selected.append(stills[idx])
+    return selected, None
+
+
+@mcp.tool()
+def get_album_stills(album_name: str) -> str:
+    """List the stills in a gallery still album, as a JSON array.
+
+    Each entry is ``{"index": <0-based position>, "label": <still label>}``.
+    Every other stills tool here addresses a still by that 0-based ``index``
+    into the ordered ``album.GetStills()`` list. Returns an empty array when
+    the album has no stills, or an "album not found" message when no still
+    album matches ``album_name``.
+
+    Parameters:
+    - album_name: name of the still album (see list_gallery_albums).
+    """
+    try:
+        gallery = _conn().get_gallery()
+        album, stills, err = _resolve_still_album(gallery, album_name)
+        if err:
+            return err
+        result = [
+            {"index": i, "label": album.GetLabel(still)}
+            for i, still in enumerate(stills)
+        ]
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_still_label(album_name: str, still_index: int) -> str:
+    """Get the label of one still in a gallery still album.
+
+    Returns a clear out-of-range message (never raising) when ``still_index``
+    falls outside the album, or an "album not found" message when no still
+    album matches ``album_name``.
+
+    Parameters:
+    - album_name: name of the still album.
+    - still_index: 0-based index of the still within album.GetStills().
+    """
+    try:
+        gallery = _conn().get_gallery()
+        album, stills, err = _resolve_still_album(gallery, album_name)
+        if err:
+            return err
+        selected, err = _stills_at_indices(stills, [still_index])
+        if err:
+            return err
+        label = album.GetLabel(selected[0])
+        return label if label else "(still has no label)"
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_still_label(album_name: str, still_index: int, label: str) -> str:
+    """Set the label of one still in a gallery still album.
+
+    Returns a clear out-of-range message (never raising) when ``still_index``
+    falls outside the album, or an "album not found" message when no still
+    album matches ``album_name``.
+
+    Parameters:
+    - album_name: name of the still album.
+    - still_index: 0-based index of the still within album.GetStills().
+    - label: new label text for the still.
+    """
+    try:
+        gallery = _conn().get_gallery()
+        album, stills, err = _resolve_still_album(gallery, album_name)
+        if err:
+            return err
+        selected, err = _stills_at_indices(stills, [still_index])
+        if err:
+            return err
+        result = album.SetLabel(selected[0], label)
+        return _ok(
+            result,
+            f"Set label of still {still_index} to '{label}'.",
+            f"Failed to set label of still {still_index}.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def import_stills(album_name: str, file_paths: list[str]) -> str:
+    """Import stills into a gallery still album from image files.
+
+    Returns an "album not found" message when no still album matches
+    ``album_name``. Requires at least one file path.
+
+    Parameters:
+    - album_name: name of the still album to import into.
+    - file_paths: list of image file paths to import as stills.
+    """
+    try:
+        gallery = _conn().get_gallery()
+        album, stills, err = _resolve_still_album(gallery, album_name)
+        if err:
+            return err
+        if not file_paths:
+            return (
+                "No file paths given — provide at least one image file to "
+                "import."
+            )
+        result = album.ImportStills(list(file_paths))
+        return _ok(
+            result,
+            f"Imported {len(file_paths)} still(s) into '{album_name}'.",
+            f"Failed to import stills into '{album_name}'. Check the paths "
+            f"point to image files Resolve can read.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def export_stills(
+    album_name: str,
+    still_indices: list[int],
+    folder_path: str,
+    file_prefix: str,
+    format: str,
+) -> str:
+    """Export stills from a gallery still album to image files.
+
+    Resolves the album by name, selects the stills at the given 0-based
+    ``still_indices`` (into ``album.GetStills()``), and writes them to
+    ``folder_path`` with ``file_prefix`` in ``format``. Returns a clear
+    out-of-range message when any index falls outside the album, and an
+    "album not found" message when no still album matches ``album_name`` —
+    never raising.
+
+    Gallery ExportStills requires the Gallery panel to be visible on the
+    Color page and returns False silently otherwise; that case is surfaced
+    as a clear failure string naming the Gallery-panel precondition, not
+    reported as success.
+
+    Parameters:
+    - album_name: name of the still album to export from.
+    - still_indices: 0-based indices of the stills to export.
+    - folder_path: output directory for the exported files.
+    - file_prefix: filename prefix for each exported still.
+    - format: one of dpx, cin, tif, jpg, png, ppm, bmp, xpm, drx.
+    """
+    try:
+        canonical, err = _check_choice(
+            format, _STILL_EXPORT_FORMATS, "format"
+        )
+        if err:
+            return err
+        gallery = _conn().get_gallery()
+        album, stills, err = _resolve_still_album(gallery, album_name)
+        if err:
+            return err
+        if not still_indices:
+            return (
+                "No still indices given — provide at least one 0-based still "
+                "index to export."
+            )
+        selected, err = _stills_at_indices(stills, still_indices)
+        if err:
+            return err
+        result = album.ExportStills(
+            selected, folder_path, file_prefix, canonical
+        )
+        if result:
+            return (
+                f"Exported {len(selected)} still(s) to '{folder_path}' "
+                f"as {canonical}."
+            )
+        return (
+            f"Failed to export {len(selected)} still(s) to '{folder_path}'. "
+            f"Gallery ExportStills requires the Gallery panel to be visible: "
+            f"switch to the Color page and show the Gallery panel, then try "
+            f"again."
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def delete_stills(album_name: str, still_indices: list[int]) -> str:
+    """Delete stills from a gallery still album by 0-based index.
+
+    Resolves the album by name and deletes the stills at the given 0-based
+    ``still_indices`` (into ``album.GetStills()``). Returns a clear
+    out-of-range message when any index falls outside the album, and an
+    "album not found" message when no still album matches ``album_name`` —
+    never raising.
+
+    Parameters:
+    - album_name: name of the still album to delete from.
+    - still_indices: 0-based indices of the stills to delete.
+    """
+    try:
+        gallery = _conn().get_gallery()
+        album, stills, err = _resolve_still_album(gallery, album_name)
+        if err:
+            return err
+        if not still_indices:
+            return (
+                "No still indices given — provide at least one 0-based still "
+                "index to delete."
+            )
+        selected, err = _stills_at_indices(stills, still_indices)
+        if err:
+            return err
+        result = album.DeleteStills(selected)
+        return _ok(
+            result,
+            f"Deleted {len(selected)} still(s) from '{album_name}'.",
+            f"Failed to delete stills from '{album_name}'.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
