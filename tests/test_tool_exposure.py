@@ -68,6 +68,62 @@ def test_ownership_grab_still_registered_once(tools):
     assert names.count("grab_still") == 1
 
 
+# The project-meta-gallery cluster: gallery/still albums, third-party &
+# sidecar metadata, project archive/cloud, timeline playback, Resolve
+# lifecycle, and per-clip transcription. Every name must be registered
+# exactly once once all sibling feature tasks (TASK-024..029) have landed.
+PROJECT_META_GALLERY_TOOLS = (
+    "list_gallery_albums",
+    "create_gallery_album",
+    "get_current_still_album",
+    "set_current_still_album",
+    "rename_gallery_album",
+    "get_album_stills",
+    "get_still_label",
+    "set_still_label",
+    "import_stills",
+    "export_stills",
+    "delete_stills",
+    "export_metadata",
+    "get_third_party_metadata",
+    "set_third_party_metadata",
+    "update_sidecar",
+    "archive_project",
+    "create_cloud_project",
+    "load_cloud_project",
+    "play_timeline",
+    "stop_timeline",
+    "quit_resolve",
+    "transcribe_clip_audio",
+    "clear_clip_transcription",
+)
+
+
+def test_project_meta_gallery_cluster_registered_exactly_once(tools):
+    """Every project-meta-gallery tool is registered exactly once.
+
+    Names a missing tool loudly if a function is left undecorated or its
+    module is never imported by ``server.py``, and flags any duplicate
+    registration.
+    """
+    counts = Counter(t.name for t in tools)
+
+    missing = [name for name in PROJECT_META_GALLERY_TOOLS if counts[name] == 0]
+    assert not missing, (
+        "project-meta-gallery tools not registered (undecorated function or "
+        f"module not imported in server.py?): {missing}"
+    )
+
+    duplicated = {
+        name: counts[name]
+        for name in PROJECT_META_GALLERY_TOOLS
+        if counts[name] > 1
+    }
+    assert not duplicated, (
+        f"project-meta-gallery tools registered more than once: {duplicated}"
+    )
+
+
 def test_ownership_no_insert_tools_from_fusion_module(tools):
     """``insert_*`` tools (generators/titles) belong to timeline_edit, not fusion."""
     import davinci_resolve_mcp.tools.fusion as fusion_module
