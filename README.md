@@ -5,7 +5,7 @@ A full-coverage [Model Context Protocol](https://modelcontextprotocol.io) server
 compositing, Fairlight audio, AI/Neural Engine features, and rendering from any MCP
 client (Claude Desktop, Cursor, or your own agent).
 
-208 tools — **190 live** tools across 18 domain modules that drive a running Resolve
+324 tools — **306 live** tools across 22 domain modules that drive a running Resolve
 instance via its scripting API, plus **18 offline** tools that read/write Resolve's own
 files (`.drp`/`.drt`/`.drx`) and a local SQLite store with **no Resolve connection at
 all**. One server, one process, one `mcp = FastMCP(...)` instance — every tool connects
@@ -125,33 +125,37 @@ src/davinci_resolve_mcp/
 
 ## Tool catalog
 
-**208 tools total** (verified by `tests/test_tool_exposure.py`, which imports the whole
-server with no Resolve instance present and asserts on `mcp.list_tools()`): **190 live**
-tools across the 18 domain modules below, driving a running Resolve instance, plus **18
+**324 tools total** (verified by `tests/test_tool_exposure.py`, which imports the whole
+server with no Resolve instance present and asserts on `mcp.list_tools()`): **306 live**
+tools across the 22 domain modules below, driving a running Resolve instance, plus **18
 offline** tools (covered in the [next section](#offline-no-resolve-tools)) that never
 touch Resolve at all. Also 3 read-only MCP resources and 1 prompt.
 
 | Module | Domain | Tools |
 |---|---|---:|
-| `tools/timeline.py` | Timeline — read/navigate/structure: list & switch timelines, duplicate, settings, tracks, timecode, item listing, markers | 20 |
-| `tools/media_pool_item.py` | `MediaPoolItem` — clip properties/metadata, markers, flags, clip color, proxy media, mark in/out | 20 |
-| `tools/project_manager.py` | `ProjectManager` — project list/create/load/save/close/delete, folder navigation, database switching, import/export/restore | 17 |
-| `tools/render.py` | Render/Deliver — formats/codecs/presets, render settings, render-queue management, job status | 17 |
-| `tools/color.py` | Color page — node graph, LUT get/set, CDL, grade-from-DRX, color versions, gallery stills | 15 |
-| `tools/media_pool.py` | `MediaPool` — bin/folder tree, media & timeline import, move/delete/relink/unlink, timeline creation | 15 |
-| `tools/resolve_app.py` | App-level — page navigation, product/version info, UI layout presets, keyframe mode, render-preset import/export | 15 |
-| `tools/timeline_item.py` | `TimelineItem` — properties, markers, clip attributes, takes | 15 |
+| `tools/color.py` | Color page — node graph, LUT get/set, CDL, grade-from-DRX, color versions, gallery stills | 42 |
+| `tools/media_pool_item.py` | `MediaPoolItem` — clip properties/metadata, markers, flags, clip color, proxy media, mark in/out | 29 |
+| `tools/timeline.py` | Timeline — read/navigate/structure: list & switch timelines, duplicate, settings, tracks, timecode, item listing, markers | 27 |
+| `tools/media_pool.py` | `MediaPool` — bin/folder tree, media & timeline import, move/delete/relink/unlink, timeline creation | 25 |
+| `tools/render.py` | Render/Deliver — formats/codecs/presets, render settings, render-queue management, job status | 24 |
+| `tools/timeline_item.py` | `TimelineItem` — properties, markers, clip attributes, takes | 22 |
+| `tools/project_manager.py` | `ProjectManager` — project list/create/load/save/close/delete, folder navigation, database switching, import/export/restore | 20 |
+| `tools/resolve_app.py` | App-level — page navigation, product/version info, UI layout presets, keyframe mode, render-preset import/export | 18 |
+| `tools/fusion.py` | Fusion comp management on timeline items — list/add/import/export/load/delete/rename | 16 |
 | `tools/timeline_edit.py` | Timeline mutation — insert/append/delete/move edits, scene-cut detection | 12 |
+| `tools/audio.py` | Audio / Fairlight — voice isolation, audio-specific track tools | 10 |
+| `tools/fx_plugins.py` | OFX / FX plugins — apply, configure, and manage effects on timeline items | 10 |
 | `tools/project.py` | Project info & settings — summary, get/set settings, name, supported render resolutions | 10 |
-| `tools/fusion.py` | Fusion comp management on timeline items — list/add/import/export/load/delete/rename | 8 |
+| `tools/inspector.py` | Inspector — timeline-item property inspection and editing | 8 |
 | `tools/media_storage.py` | `MediaStorage` — mounted-volume browsing, add-to-media-pool | 7 |
 | `tools/ai.py` | AI / Neural Engine — Magic Mask, Smart Reframe, Stabilize, AI subtitles | 6 |
-| `tools/audio.py` | Audio / Fairlight — voice isolation, audio-specific track tools | 4 |
-| `tools/transcription.py` | Local speech-to-text (mlx-whisper / openai-whisper) | 4 |
+| `tools/transcription.py` | Local speech-to-text (mlx-whisper / openai-whisper) | 6 |
+| `tools/transitions.py` | Transitions — add/remove/configure timeline transitions | 5 |
+| `tools/keyframes.py` | Keyframes — read/set/delete animation keyframes on timeline items | 4 |
 | `tools/export_still.py` | Timeline export, current-frame still export, clip thumbnail grab | 3 |
 | `tools/code.py` | `execute_resolve_code` — arbitrary-snippet escape hatch for uncovered API surface | 1 |
 | `tools/screenshot.py` | Screenshot of the running Resolve UI, returned as an in-band MCP `Image` | 1 |
-| **Total** | | **190** |
+| **Total** | | **306** |
 
 Plus:
 - **3 read-only resources** (`resources.py`): `resolve://project/info`,
@@ -160,7 +164,7 @@ Plus:
   driving Resolve through this tool surface.
 
 Run `./.venv/bin/python -c "from davinci_resolve_mcp.server import mcp; import asyncio; print(len(asyncio.run(mcp.list_tools())))"`
-yourself at any time to re-verify the live count (190 + 18 = 208) — no Resolve
+yourself at any time to re-verify the live count (306 + 18 = 324) — no Resolve
 installation required.
 
 ## Offline (no-Resolve) tools
@@ -274,7 +278,7 @@ npx @ciprianspiridon/davinci-resolve-mcp doctor      # health check
 ```
 
 After installing, check health any time with **`davinci-resolve-mcp doctor`** (verifies
-all 208 tools — 190 live + 18 offline — register and, if Resolve is running, that a live
+all 324 tools — 306 live + 18 offline — register and, if Resolve is running, that a live
 connection succeeds). The `setup`/`doctor` subcommands are also available on the console script directly
 (`davinci-resolve-mcp setup --clients cursor`).
 
@@ -428,7 +432,7 @@ yourself and point a client at the console script directly.
 `tests/test_tool_exposure.py` imports the full server with **no DaVinci Resolve
 instance present and no network access**, and asserts:
 
-- at least 100 tools are registered (the real count is 208: 190 live + 18 offline —
+- at least 100 tools are registered (the real count is 324: 306 live + 18 offline —
   see the [Tool catalog](#tool-catalog) and [Offline tools](#offline-no-resolve-tools)
   sections above),
 - every tool name is globally unique,

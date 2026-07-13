@@ -67,7 +67,7 @@ assert len(names)>=100 and len(names)==len(set(names))
 print(f"OK: {len(names)} tools, {len(res)} resources, unique")
 PY
 ```
-**Gate 3:** prints `OK: 208 tools, 3 resources, unique` (≥100 required; 208 = 190 live + 18 offline). If it errors on
+**Gate 3:** prints `OK: 324 tools, 3 resources, unique` (≥100 required; 324 = 306 live + 18 offline). If it errors on
 import, the install is broken — do not register a broken server.
 
 ## Phase 4 — Enable Resolve scripting  *(HUMAN STEP)*

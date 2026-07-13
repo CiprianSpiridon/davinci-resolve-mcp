@@ -5,7 +5,7 @@ description: >-
   Set up and drive DaVinci Resolve through the davinci-resolve MCP server: editing, media
   pool, color grading, Fusion, Fairlight audio, AI/Neural Engine, rendering, and local
   transcription — plus 18 OFFLINE tools that read/write Resolve's own .drp/.drt/.drx files
-  and a local SQLite store with no Resolve running (208 tools total). Handles first-run
+  and a local SQLite store with no Resolve running (324 tools total). Handles first-run
   ONBOARDING (installs and registers the MCP server if it isn't configured yet) and
   day-to-day operation. Use when the user wants to set up the DaVinci Resolve MCP, or to
   inspect/change a Resolve project, timeline, clips, grade, titles, subtitles, or renders,
@@ -25,7 +25,7 @@ argument-hint: "[install the resolve mcp | a DaVinci Resolve task, e.g. 'render 
 # DaVinci Resolve MCP — setup & operation
 
 This skill covers the **`davinci-resolve` MCP server** end to end: onboarding a machine
-that doesn't have it yet, then operating its **208 tools** — **190 live** across 18 domains
+that doesn't have it yet, then operating its **324 tools** — **306 live** across 18 domains
 (project/timeline/media/color/Fusion/Fairlight/AI/render/transcription) that drive a running
 Resolve, plus **18 offline** tools that read/write Resolve's own files (`.drp`/`.drt`/`.drx`)
 and a local SQLite store with no Resolve running — plus 3 `resolve://` resources and an
@@ -34,7 +34,7 @@ and a local SQLite store with no Resolve running — plus 3 `resolve://` resourc
 **Two references, loaded on demand (don't inline them):**
 - [`reference/setup.md`](./reference/setup.md) — the full, gated MCP install/registration
   runbook. Open it when onboarding.
-- [`reference/tool-catalog.md`](./reference/tool-catalog.md) — the exact 208-tool list
+- [`reference/tool-catalog.md`](./reference/tool-catalog.md) — the exact 324-tool list
   (live + offline) with one-line descriptions, grouped by module. Open it when you need a
   precise tool name/param.
 
@@ -54,7 +54,7 @@ server).
 
 **Open [`reference/setup.md`](./reference/setup.md) and follow it phase by phase.** It is a
 gated runbook that: detects OS/Python (≥3.10), clones the repo, creates a `.venv` and
-editable-installs the server, verifies **208 tools register offline** (no Resolve needed),
+editable-installs the server, verifies **324 tools register offline** (no Resolve needed),
 flags the two **human-only** steps (enable Resolve *External scripting = Local*; restart
 the MCP client), registers the server with Claude Code (`claude mcp add`), Claude Desktop,
 or Cursor using an **absolute** venv binary path, and runs a live smoke test.
