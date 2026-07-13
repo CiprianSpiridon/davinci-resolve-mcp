@@ -230,6 +230,103 @@ def set_clip_metadata(clip_name: str, metadata_type: str, metadata_value: str) -
         return f"Error: {e}"
 
 
+@mcp.tool()
+def get_third_party_metadata(clip_name: str, metadata_type: str = "") -> str:
+    """Get one or all third-party metadata fields of a media pool clip, as JSON.
+
+    Third-party metadata is a separate namespace from the standard clip
+    metadata (``get_clip_metadata``): it holds keys written by external tools
+    and plugins via ``MediaPoolItem.GetThirdPartyMetadata()``.
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the current media pool
+      folder.
+    - metadata_type: specific third-party metadata key. Leave empty to get all
+      third-party metadata fields.
+    """
+    try:
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "GetThirdPartyMetadata"):
+            return "Error: GetThirdPartyMetadata is not available on this clip object."
+        if metadata_type:
+            value = clip.GetThirdPartyMetadata(metadata_type)
+            if value is None or value == "":
+                return (
+                    f"Error: Third-party metadata field '{metadata_type}' not found "
+                    f"or has no value on clip '{clip_name}'."
+                )
+            return json.dumps({metadata_type: value}, default=str)
+        metadata = clip.GetThirdPartyMetadata()
+        if not isinstance(metadata, dict):
+            return f"Error: Could not retrieve third-party metadata for clip '{clip_name}'."
+        return json.dumps(metadata, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_third_party_metadata(clip_name: str, key: str, value: str) -> str:
+    """Set a third-party metadata field on a media pool clip.
+
+    Wraps ``MediaPoolItem.SetThirdPartyMetadata(key, value)`` — the third-party
+    namespace, distinct from the standard clip metadata set by
+    ``set_clip_metadata``.
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the current media pool
+      folder.
+    - key: third-party metadata key to set.
+    - value: new value as a string. Numeric-looking strings are coerced to
+      int/float and "true"/"false" to bool before being passed to the Resolve
+      API; anything else is passed through as a string.
+    """
+    try:
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "SetThirdPartyMetadata"):
+            return "Error: SetThirdPartyMetadata is not available on this clip object."
+        coerced = _coerce_value(value)
+        result = clip.SetThirdPartyMetadata(key, coerced)
+        return _ok(
+            result,
+            f"Set third-party metadata '{key}' = {coerced!r} on clip '{clip_name}'.",
+            f"Error: Failed to set third-party metadata '{key}' = {coerced!r} on "
+            f"clip '{clip_name}'. The key may be invalid or read-only.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def update_sidecar(clip_name: str) -> str:
+    """Update the sidecar file for a camera-raw media pool clip.
+
+    Wraps ``MediaPoolItem.UpdateSidecar()``, which re-reads the clip's sidecar
+    (the ``.sidecar`` file for Blackmagic RAW clips, or the ``.rmd`` file for
+    RED R3D clips). Clips whose source media has no sidecar — anything that
+    isn't a supported camera-raw format — cause Resolve to return ``False``;
+    this tool surfaces that as a clear failure rather than a false success and
+    never raises.
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the current media pool
+      folder.
+    """
+    try:
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "UpdateSidecar"):
+            return "Error: UpdateSidecar is not available on this clip object."
+        result = clip.UpdateSidecar()
+        return _ok(
+            result,
+            f"Updated the sidecar file for clip '{clip_name}'.",
+            f"Error: Failed to update the sidecar for clip '{clip_name}'. The "
+            "clip may not be a camera-raw format (Blackmagic RAW .sidecar or RED "
+            ".rmd) or may have no sidecar file to update.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
 # ── Clip markers ─────────────────────────────────────────────────────────
 
 

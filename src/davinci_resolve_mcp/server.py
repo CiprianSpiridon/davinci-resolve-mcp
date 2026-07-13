@@ -37,6 +37,9 @@ from .tools import code  # noqa: F401
 from .tools import color  # noqa: F401
 from .tools import export_still  # noqa: F401
 from .tools import fusion  # noqa: F401
+from .tools import fx_plugins  # noqa: F401
+from .tools import inspector  # noqa: F401
+from .tools import keyframes  # noqa: F401
 from .tools import media_pool  # noqa: F401
 from .tools import media_pool_item  # noqa: F401
 from .tools import media_storage  # noqa: F401
@@ -49,6 +52,7 @@ from .tools import timeline  # noqa: F401
 from .tools import timeline_edit  # noqa: F401
 from .tools import timeline_item  # noqa: F401
 from .tools import transcription  # noqa: F401
+from .tools import transitions  # noqa: F401
 
 # ── Offline (no-Resolve) tool module registration ───────────────────────
 # These 18 modules never contact a running Resolve instance — they operate

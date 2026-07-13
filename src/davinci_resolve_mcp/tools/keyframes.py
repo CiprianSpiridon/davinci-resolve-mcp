@@ -1,6 +1,20 @@
-"""Fusion keyframe-animation tools for the DaVinci Resolve MCP server.
+"""Keyframe-animation tools for the DaVinci Resolve MCP server.
 
-This module owns *keyframing* a Fusion tool input on a timeline item's
+This module owns two distinct keyframe surfaces:
+
+1. *Edit-page transform keyframes* on a ``TimelineItem`` directly —
+   ``add_transform_keyframe`` / ``get_transform_keyframes`` /
+   ``delete_transform_keyframe`` drive the Inspector's Transform/Crop/Composite
+   properties (Pan, Tilt, ZoomX/Y, RotationAngle, AnchorPointX/Y,
+   CropLeft/Right/Top/Bottom, Opacity) via ``item.AddKeyframe`` /
+   ``item.DeleteKeyframe`` and read them back with ``GetKeyframeCount`` +
+   ``GetKeyframeAtIndex`` / ``GetPropertyAtKeyframeIndex``. Keyframe mode must be
+   enabled first (see ``set_keyframe_mode``) for the Edit-page keys to persist.
+
+2. *Fusion input keyframes* (below): keyframing a Fusion tool input on a
+   timeline item's composition.
+
+The Fusion path owns *keyframing* a Fusion tool input on a timeline item's
 composition. Unlike a static ``SetInput``, animating an input requires a
 modifier: a plain ``SetInput`` on a virgin (unanimated) input only changes its
 constant value and does NOT create a keyframe. So ``fusion_add_keyframe``
@@ -28,8 +42,51 @@ import json
 from typing import Any, Optional
 
 from ..app import mcp
-from ..helpers import _coerce_value, _get_timeline_item
+from ..helpers import _check_choice, _coerce_value, _get_timeline_item
 from .fusion import _get_fusion_comp, _resolve_tool
+
+# Edit-page transform properties that can be keyframed directly on a
+# ``TimelineItem`` (via ``AddKeyframe``/``DeleteKeyframe``). This is the
+# Inspector's Transform/Crop/Composite vocabulary — distinct from the Fusion
+# spline path above, which keys a Fusion tool input on the item's comp.
+TRANSFORM_KEYFRAME_PROPERTIES = (
+    "Pan", "Tilt", "ZoomX", "ZoomY", "RotationAngle",
+    "AnchorPointX", "AnchorPointY",
+    "CropLeft", "CropRight", "CropTop", "CropBottom",
+    "Opacity",
+)
+
+# Interpolation vocabulary accepted by ``TimelineItem.SetKeyframeInterpolation``.
+KEYFRAME_INTERPOLATIONS = ("Linear", "Bezier", "EaseIn", "EaseOut", "EaseInOut")
+
+
+def _read_transform_keyframes(item, prop):
+    """Read back the keyframes for ``prop`` on ``item`` as ``(count, keys)``.
+
+    Uses ``GetKeyframeCount`` + ``GetKeyframeAtIndex`` /
+    ``GetPropertyAtKeyframeIndex``. Returns ``(0, [])`` when the property has no
+    keyframes (or the count is unavailable). Never raises — an unreadable index
+    contributes a ``None`` frame/value rather than aborting the read.
+    """
+    try:
+        count = item.GetKeyframeCount(prop)
+    except Exception:
+        count = None
+    if not count:
+        return 0, []
+    keys = []
+    for i in range(count):
+        try:
+            kf = item.GetKeyframeAtIndex(prop, i)
+        except Exception:
+            kf = None
+        frame = kf.get("frame") if isinstance(kf, dict) else kf
+        try:
+            val = item.GetPropertyAtKeyframeIndex(prop, i)
+        except Exception:
+            val = None
+        keys.append({"frame": frame, "value": val})
+    return count, keys
 
 
 def _input_for(tool, input_name: str):
@@ -203,4 +260,190 @@ def fusion_add_keyframe(
             "modifier": "BezierSpline",
         }, indent=2, default=str)
     except Exception as e:
+        return f"Error: {e}"
+
+
+# ── Edit-page transform keyframes (TimelineItem) ────────────────────────────
+
+
+@mcp.tool()
+def add_transform_keyframe(
+    property_name: str,
+    frame: int,
+    value: str,
+    interpolation: str = "",
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Add an Edit-page transform keyframe on a timeline item.
+
+    This keys an Inspector Transform/Crop/Composite property directly on the
+    ``TimelineItem`` (via ``item.AddKeyframe(property, frame, value)``) — NOT a
+    Fusion input. Keyframe mode must be enabled first (call ``set_keyframe_mode``
+    with mode 1 or 2) for the key to persist; otherwise the change is applied as
+    a static value.
+
+    The string ``value`` is auto-coerced to int/float/bool where it looks
+    numeric/boolean (e.g. "1.0" -> 1, "0.5" -> 0.5). An optional ``interpolation``
+    is applied after the key is created via ``SetKeyframeInterpolation``.
+
+    Parameters:
+    - property_name: one of "Pan", "Tilt", "ZoomX", "ZoomY", "RotationAngle",
+      "AnchorPointX", "AnchorPointY", "CropLeft", "CropRight", "CropTop",
+      "CropBottom", "Opacity".
+    - frame: the (timeline) frame at which to place the keyframe.
+    - value: the keyframe value, as a string (auto-coerced).
+    - interpolation: optional — one of "Linear", "Bezier", "EaseIn", "EaseOut",
+      "EaseInOut". Empty string (default) leaves interpolation at its default.
+    - track_type: "video" (default), "audio", or "subtitle".
+    - track_index: 1-based track index (default: 1).
+    - item_index: 0-based index of the item within that track (default: 0).
+    """
+    try:
+        prop, err = _check_choice(
+            property_name, TRANSFORM_KEYFRAME_PROPERTIES, "transform property"
+        )
+        if err:
+            return err
+
+        interp = None
+        if interpolation:
+            interp, ierr = _check_choice(
+                interpolation, KEYFRAME_INTERPOLATIONS, "keyframe interpolation"
+            )
+            if ierr:
+                return ierr
+
+        item = _get_timeline_item(track_type, track_index, item_index)
+        if not hasattr(item, "AddKeyframe"):
+            return (
+                "Error: AddKeyframe is not available on this timeline item — "
+                "the installed Resolve API does not support Edit-page "
+                "transform keyframes."
+            )
+
+        coerced = _coerce_value(value)
+        added = item.AddKeyframe(prop, frame, coerced)
+        if not added:
+            return (
+                f"Error: Failed to add keyframe on '{prop}' at frame {frame}. "
+                "Enable keyframe mode first (set_keyframe_mode), and ensure the "
+                "frame falls within the clip's timeline range."
+            )
+
+        interp_applied = None
+        if interp is not None:
+            try:
+                interp_applied = bool(
+                    item.SetKeyframeInterpolation(prop, frame, interp)
+                )
+            except Exception:
+                interp_applied = False
+
+        count, keys = _read_transform_keyframes(item, prop)
+        return json.dumps({
+            "success": True,
+            "property": prop,
+            "frame": frame,
+            "value": coerced,
+            "interpolation": interp,
+            "interpolation_applied": interp_applied,
+            "keyframe_count": count,
+            "keyframes": keys,
+        }, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_transform_keyframes(
+    property_name: str,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Read back the Edit-page transform keyframes for a property on an item.
+
+    Returns the keyframe count and, for each key, its frame and value (via
+    ``GetKeyframeCount`` + ``GetKeyframeAtIndex`` / ``GetPropertyAtKeyframeIndex``).
+    A property with no keyframes yields ``"count": 0`` and an empty ``keyframes``
+    list — this never raises.
+
+    Parameters:
+    - property_name: one of "Pan", "Tilt", "ZoomX", "ZoomY", "RotationAngle",
+      "AnchorPointX", "AnchorPointY", "CropLeft", "CropRight", "CropTop",
+      "CropBottom", "Opacity".
+    - track_type: "video" (default), "audio", or "subtitle".
+    - track_index: 1-based track index (default: 1).
+    - item_index: 0-based index of the item within that track (default: 0).
+    """
+    try:
+        prop, err = _check_choice(
+            property_name, TRANSFORM_KEYFRAME_PROPERTIES, "transform property"
+        )
+        if err:
+            return err
+
+        item = _get_timeline_item(track_type, track_index, item_index)
+        count, keys = _read_transform_keyframes(item, prop)
+        return json.dumps({
+            "success": True,
+            "property": prop,
+            "count": count,
+            "keyframes": keys,
+        }, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def delete_transform_keyframe(
+    property_name: str,
+    frame: int,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Delete an Edit-page transform keyframe at a frame on a timeline item.
+
+    Calls ``item.DeleteKeyframe(property, frame)`` and reports the remaining
+    keyframe count for the property. Deleting when no keyframe exists at that
+    frame (or the property has no keyframes at all) returns ``"deleted": false``
+    with the current count rather than raising.
+
+    Parameters:
+    - property_name: one of "Pan", "Tilt", "ZoomX", "ZoomY", "RotationAngle",
+      "AnchorPointX", "AnchorPointY", "CropLeft", "CropRight", "CropTop",
+      "CropBottom", "Opacity".
+    - frame: the (timeline) frame of the keyframe to delete.
+    - track_type: "video" (default), "audio", or "subtitle".
+    - track_index: 1-based track index (default: 1).
+    - item_index: 0-based index of the item within that track (default: 0).
+    """
+    try:
+        prop, err = _check_choice(
+            property_name, TRANSFORM_KEYFRAME_PROPERTIES, "transform property"
+        )
+        if err:
+            return err
+
+        item = _get_timeline_item(track_type, track_index, item_index)
+        deleted = False
+        if hasattr(item, "DeleteKeyframe"):
+            try:
+                deleted = bool(item.DeleteKeyframe(prop, frame))
+            except Exception:
+                deleted = False
+
+        count, keys = _read_transform_keyframes(item, prop)
+        return json.dumps({
+            "success": True,
+            "property": prop,
+            "frame": frame,
+            "deleted": deleted,
+            "keyframe_count": count,
+            "keyframes": keys,
+        }, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
         return f"Error: {e}"

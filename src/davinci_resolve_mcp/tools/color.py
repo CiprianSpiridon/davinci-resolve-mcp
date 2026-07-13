@@ -841,3 +841,186 @@ def reset_node_colors(
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
+
+
+# ── Color groups ─────────────────────────────────────────────────────────
+#
+# This repo has no object-id registry, so ColorGroup objects are addressed
+# BY NAME: scan Project.GetColorGroupsList() and match ColorGroup.GetName().
+
+
+def _get_color_group_by_name(project, name: str):
+    """Return the ``ColorGroup`` on ``project`` whose name is ``name``.
+
+    Scans ``Project.GetColorGroupsList()`` and matches on
+    ``ColorGroup.GetName()``; returns ``None`` when no group matches so
+    callers can emit a clear "No color group named ..." message without
+    touching Delete/Assign APIs.
+    """
+    groups = project.GetColorGroupsList()
+    if not groups:
+        return None
+    for group in groups:
+        if group.GetName() == name:
+            return group
+    return None
+
+
+@mcp.tool()
+def list_color_groups() -> str:
+    """List the names of all color groups in the current project, as a JSON array.
+
+    Returns an empty array when the project has no color groups.
+    """
+    try:
+        project = _conn().get_project()
+        groups = project.GetColorGroupsList()
+        names = [g.GetName() for g in groups] if groups else []
+        return json.dumps(names, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def add_color_group(group_name: str) -> str:
+    """Create a new color group in the current project.
+
+    Parameters:
+    - group_name: name for the new color group.
+    """
+    try:
+        project = _conn().get_project()
+        group = project.AddColorGroup(group_name)
+        return _ok(
+            group is not None,
+            f"Created color group '{group_name}'.",
+            f"Failed to create color group '{group_name}'. A group with that "
+            "name may already exist.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def delete_color_group(group_name: str) -> str:
+    """Delete a color group from the current project by name.
+
+    Parameters:
+    - group_name: name of the color group to delete.
+    """
+    try:
+        project = _conn().get_project()
+        group = _get_color_group_by_name(project, group_name)
+        if group is None:
+            return (
+                f"No color group named '{group_name}'. Use list_color_groups "
+                "to see the available groups."
+            )
+        result = project.DeleteColorGroup(group)
+        return _ok(
+            result,
+            f"Deleted color group '{group_name}'.",
+            f"Failed to delete color group '{group_name}'. It may still have "
+            "clips assigned to it.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def assign_clip_to_color_group(
+    group_name: str,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Assign a clip to a color group by group name.
+
+    Parameters:
+    - group_name: name of the color group to assign the clip to.
+    - track_type: "video", "audio", or "subtitle" (default "video").
+    - track_index: 1-based track index (default 1).
+    - item_index: 0-based item index within that track (default 0).
+    """
+    try:
+        project = _conn().get_project()
+        group = _get_color_group_by_name(project, group_name)
+        if group is None:
+            return (
+                f"No color group named '{group_name}'. Use list_color_groups "
+                "to see the available groups, or add_color_group to create it."
+            )
+        item = _get_timeline_item(track_type, track_index, item_index)
+        result = item.AssignToColorGroup(group)
+        return _ok(
+            result,
+            f"Assigned clip to color group '{group_name}'.",
+            f"Failed to assign clip to color group '{group_name}'.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def remove_clip_from_color_group(
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Remove a clip from whatever color group it is currently assigned to.
+
+    Parameters:
+    - track_type: "video", "audio", or "subtitle" (default "video").
+    - track_index: 1-based track index (default 1).
+    - item_index: 0-based item index within that track (default 0).
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        result = item.RemoveFromColorGroup()
+        return _ok(
+            result,
+            "Removed clip from its color group.",
+            "Failed to remove clip from color group. The clip may not be "
+            "assigned to any group.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_color_group_node_graph(group_name: str, stage: str = "pre") -> str:
+    """Get a color group's pre-clip or post-clip node graph, as JSON.
+
+    The pre-clip graph applies before each member clip's individual grade;
+    the post-clip graph applies after.
+
+    Parameters:
+    - group_name: name of the color group.
+    - stage: "pre" for the pre-clip node graph or "post" for the post-clip
+      node graph (case-insensitive, default "pre").
+    """
+    try:
+        canonical, err = _check_choice(stage, ("pre", "post"), "stage")
+        if err:
+            return err
+
+        project = _conn().get_project()
+        group = _get_color_group_by_name(project, group_name)
+        if group is None:
+            return (
+                f"No color group named '{group_name}'. Use list_color_groups "
+                "to see the available groups."
+            )
+
+        if canonical == "pre":
+            graph = group.GetPreClipNodeGraph()
+        else:
+            graph = group.GetPostClipNodeGraph()
+        if graph is None:
+            return (
+                f"No {canonical}-clip node graph available for color group "
+                f"'{group_name}'."
+            )
+        return json.dumps(node_graph_to_dict(graph), indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"

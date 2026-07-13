@@ -409,6 +409,63 @@ def unlink_clips(clip_names: list[str]) -> str:
         return f"Error: {e}"
 
 
+@mcp.tool()
+def export_metadata(file_path: str, clip_names: list[str] = []) -> str:
+    """Export clip metadata from the Media Pool to a CSV file, as JSON.
+
+    Wraps ``MediaPool.ExportMetadata(fileName, [clips])``. With an empty
+    ``clip_names`` list, metadata for *all* clips in the Media Pool is
+    exported; otherwise only the named clips (resolved against the current
+    folder) are exported. Names that don't resolve are reported back distinctly
+    under ``not_found`` and abort the export rather than silently exporting a
+    partial set.
+
+    Parameters:
+    - file_path: absolute path for the output CSV file.
+    - clip_names: optional list of clip names (in the current folder) to
+      export. Leave empty (the default) to export every clip in the Media Pool.
+    """
+    try:
+        if not file_path or not file_path.strip():
+            return "Error: file_path must be a non-empty string."
+        mp = _media_pool()
+
+        clips: list = []
+        if clip_names:
+            folder = _current_folder()
+            clips, not_found = _resolve_clips_by_name(folder, clip_names)
+            if not_found:
+                return json.dumps(
+                    {
+                        "success": False,
+                        "not_found": not_found,
+                        "message": (
+                            "Could not resolve these clip name(s) in the current "
+                            "Media Pool folder; nothing was exported."
+                        ),
+                    },
+                    indent=2,
+                )
+
+        # An empty list tells Resolve to export metadata for all clips.
+        result = mp.ExportMetadata(file_path, clips)
+        return _ok(
+            result,
+            json.dumps(
+                {
+                    "success": True,
+                    "file_path": file_path,
+                    "exported": "all clips" if not clips else len(clips),
+                },
+                indent=2,
+            ),
+            f"Error: Failed to export metadata to '{file_path}'. Check that the "
+            "path is writable and the Media Pool has clips to export.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
 # ── Timelines ─────────────────────────────────────────────────────────────
 
 
