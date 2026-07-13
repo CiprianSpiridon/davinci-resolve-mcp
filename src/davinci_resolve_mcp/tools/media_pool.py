@@ -747,3 +747,180 @@ def set_selected_clip(clip_name: str) -> str:
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
+
+
+# ── Mattes & bin (.drb) import ─────────────────────────────────────────────
+
+
+@mcp.tool()
+def get_clip_matte_list(clip_name: str) -> str:
+    """List the matte (alpha/mask) file paths attached to a Media Pool clip, as JSON.
+
+    Resolves ``clip_name`` against the Media Pool's current folder
+    (``MediaPool.GetCurrentFolder()``) and calls
+    ``MediaPool.GetClipMatteList(mediaPoolItem)``, returning the matte file
+    paths as a JSON array (an empty array when the clip has no mattes).
+
+    Parameters:
+    - clip_name: name of the clip (in the current folder) to inspect. If it
+      doesn't resolve, it's reported back under ``not_found`` (with the
+      available clip names) rather than raising.
+    """
+    try:
+        if not clip_name or not clip_name.strip():
+            return "Error: clip_name must be a non-empty string."
+        mp = _media_pool()
+        folder = _current_folder()
+        clips, not_found = _resolve_clips_by_name(folder, [clip_name])
+        if not clips:
+            available = []
+            for clip in (folder.GetClipList() or [])[:20]:
+                try:
+                    available.append(clip.GetName())
+                except Exception:  # noqa: BLE001
+                    continue
+            return json.dumps(
+                {
+                    "success": False,
+                    "not_found": not_found,
+                    "message": f"Clip '{clip_name}' not found in the current Media Pool folder.",
+                    "available_clips": available,
+                },
+                indent=2,
+            )
+
+        mattes = mp.GetClipMatteList(clips[0])
+        paths = list(mattes) if mattes else []
+        return json.dumps(paths, indent=2)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_timeline_matte_list(folder_name: str) -> str:
+    """List the timeline mattes stored in a Media Pool folder, by folder name, as JSON.
+
+    Resolves ``folder_name`` by searching the whole Media Pool folder tree
+    (depth-first from the root) and calls
+    ``MediaPool.GetTimelineMatteList(folder)``, returning the matte clips'
+    *names* as a JSON array (an empty array when the folder has no timeline
+    mattes).
+
+    Parameters:
+    - folder_name: name of the folder to list mattes from. If it doesn't
+      resolve, it's reported back under ``not_found`` (with the available
+      folder names) rather than raising.
+    """
+    try:
+        if not folder_name or not folder_name.strip():
+            return "Error: folder_name must be a non-empty string."
+        mp = _media_pool()
+        root = mp.GetRootFolder()
+        if root is None:
+            return "Error: Could not get the Media Pool root folder."
+        folder = _find_folder_by_name(root, folder_name)
+        if folder is None:
+            available = []
+
+            def _collect(f, depth=0):
+                if depth > 5:
+                    return
+                try:
+                    available.append(f.GetName())
+                except Exception:  # noqa: BLE001
+                    pass
+                for sub in f.GetSubFolderList() or []:
+                    _collect(sub, depth + 1)
+
+            _collect(root)
+            return json.dumps(
+                {
+                    "success": False,
+                    "not_found": [folder_name],
+                    "message": f"Folder '{folder_name}' not found in the Media Pool.",
+                    "available_folders": available[:50],
+                },
+                indent=2,
+            )
+
+        mattes = mp.GetTimelineMatteList(folder)
+        names = []
+        for matte in mattes or []:
+            try:
+                names.append(matte.GetName())
+            except Exception:  # noqa: BLE001
+                continue
+        return json.dumps(names, indent=2)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def delete_clip_mattes(clip_name: str, paths: list[str]) -> str:
+    """Delete matte files from a Media Pool clip, by clip name, as JSON.
+
+    Resolves ``clip_name`` against the Media Pool's current folder and calls
+    ``MediaPool.DeleteClipMattes(mediaPoolItem, paths)``.
+
+    Parameters:
+    - clip_name: name of the clip (in the current folder) whose mattes to
+      delete. If it doesn't resolve, it's reported back under ``not_found``
+      rather than raising.
+    - paths: list of matte file paths to delete (as returned by
+      ``get_clip_matte_list``).
+    """
+    try:
+        if not clip_name or not clip_name.strip():
+            return "Error: clip_name must be a non-empty string."
+        if not paths:
+            return "Error: paths must be a non-empty list."
+        mp = _media_pool()
+        folder = _current_folder()
+        clips, not_found = _resolve_clips_by_name(folder, [clip_name])
+        if not clips:
+            return json.dumps(
+                {
+                    "success": False,
+                    "not_found": not_found,
+                    "message": f"Clip '{clip_name}' not found in the current Media Pool folder.",
+                },
+                indent=2,
+            )
+
+        result = mp.DeleteClipMattes(clips[0], paths)
+        return _ok(
+            result,
+            f"Deleted {len(paths)} matte(s) from clip '{clip_name}'.",
+            f"Error: Failed to delete mattes from clip '{clip_name}'.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def import_folder_from_file(file_path: str, source_clips_path: str = "") -> str:
+    """Import a Media Pool bin from a ``.drb`` file into the current folder.
+
+    Calls ``MediaPool.ImportFolderFromFile(filePath, sourceClipsPath)``. The
+    imported folder (and its clips) is added under the Media Pool's current
+    folder.
+
+    Parameters:
+    - file_path: absolute path to the ``.drb`` bin file to import.
+    - source_clips_path: optional filesystem path Resolve searches to relink
+      the imported clips' source media. Leave empty to skip relinking.
+    """
+    try:
+        if not file_path or not file_path.strip():
+            return "Error: file_path must be a non-empty string."
+        mp = _media_pool()
+        result = (
+            mp.ImportFolderFromFile(file_path, source_clips_path)
+            if source_clips_path
+            else mp.ImportFolderFromFile(file_path)
+        )
+        if result:
+            return f"Imported folder from '{file_path}'."
+        return f"Error: Failed to import folder from '{file_path}'."
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"

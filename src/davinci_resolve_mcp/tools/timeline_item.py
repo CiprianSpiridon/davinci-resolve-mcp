@@ -659,3 +659,156 @@ def get_source_audio_channel_mapping(
             return mapping if mapping else "No source audio channel mapping is available."
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
+
+
+# ── Render-cache control ─────────────────────────────────────────────────
+# The Color-page and Fusion-page output caches Resolve can hold per clip.
+# Color cache is a simple on/off (``SetColorOutputCache(bool)``); Fusion cache
+# is tri-state — "auto" lets Resolve decide, "enabled"/"disabled" force it
+# (``SetFusionOutputCache('auto'|'enabled'|'disabled')``).
+
+
+FUSION_CACHE_VALUES = ("auto", "enabled", "disabled")
+
+
+@mcp.tool()
+def get_output_cache_state(
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Get the color and Fusion output-cache state of a timeline item, as JSON.
+
+    Merges ``TimelineItem.GetIsColorOutputCacheEnabled`` (color-page cache
+    on/off) and ``TimelineItem.GetIsFusionOutputCacheEnabled`` (Fusion-page
+    cache; may report "auto") into a single ``{"color_output_cache": ...,
+    "fusion_output_cache": ...}`` object. Either method is guarded with
+    ``hasattr`` so a Resolve build that lacks one still returns the other.
+
+    Parameters:
+    - track_type: one of "video", "audio", "subtitle". Defaults to "video".
+    - track_index: 1-based track index.
+    - item_index: 0-based index of the item within that track's item list.
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        result: dict = {}
+        if hasattr(item, "GetIsColorOutputCacheEnabled"):
+            result["color_output_cache"] = item.GetIsColorOutputCacheEnabled()
+        if hasattr(item, "GetIsFusionOutputCacheEnabled"):
+            result["fusion_output_cache"] = item.GetIsFusionOutputCacheEnabled()
+        if not result:
+            return "Error: Output-cache state is not available on this timeline item."
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_color_output_cache(
+    enabled: bool = True,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Enable or disable the color-page output cache for a timeline item.
+
+    Wraps ``TimelineItem.SetColorOutputCache(bool)``.
+
+    Parameters:
+    - enabled: True to enable the color output cache, False to disable it.
+    - track_type: one of "video", "audio", "subtitle". Defaults to "video".
+    - track_index: 1-based track index.
+    - item_index: 0-based index of the item within that track's item list.
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        if not hasattr(item, "SetColorOutputCache"):
+            return "Error: Color output cache is not available on this timeline item."
+        result = item.SetColorOutputCache(bool(enabled))
+        return _ok(
+            result,
+            f"Color output cache {'enabled' if enabled else 'disabled'} on "
+            f"{track_type} track {track_index} item {item_index}.",
+            "Error: Failed to set the color output cache state.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_fusion_output_cache(
+    cache_value: str,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Set the Fusion-page output cache mode for a timeline item.
+
+    Wraps ``TimelineItem.SetFusionOutputCache('auto'|'enabled'|'disabled')``.
+    The mode is validated before Resolve is contacted, so an invalid value
+    returns an actionable error listing the accepted modes.
+
+    Parameters:
+    - cache_value: one of "auto", "enabled", "disabled". "auto" lets Resolve
+      decide when to cache; "enabled"/"disabled" force it on/off.
+    - track_type: one of "video", "audio", "subtitle". Defaults to "video".
+    - track_index: 1-based track index.
+    - item_index: 0-based index of the item within that track's item list.
+    """
+    try:
+        cache_value, err = _check_choice(cache_value, FUSION_CACHE_VALUES, "Fusion cache value")
+        if err:
+            return err
+        item = _get_timeline_item(track_type, track_index, item_index)
+        if not hasattr(item, "SetFusionOutputCache"):
+            return "Error: Fusion output cache is not available on this timeline item."
+        result = item.SetFusionOutputCache(cache_value)
+        return _ok(
+            result,
+            f"Fusion output cache set to '{cache_value}' on {track_type} "
+            f"track {track_index} item {item_index}.",
+            f"Error: Failed to set the Fusion output cache to '{cache_value}'.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Stereo 3D (read-only) ────────────────────────────────────────────────
+
+
+@mcp.tool()
+def get_stereo_params(
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Get the stereoscopic-3D parameters of a timeline item, as JSON.
+
+    Merges ``TimelineItem.GetStereoConvergenceValues`` (convergence keyframes,
+    keyed by frame offset), ``GetStereoLeftFloatingWindowParams`` and
+    ``GetStereoRightFloatingWindowParams`` (per-eye floating-window keyframes)
+    into a single ``{"convergence": ..., "left_floating_window": ...,
+    "right_floating_window": ...}`` object. Each of the three calls is guarded
+    with ``hasattr`` — a method missing on the running Resolve build is simply
+    omitted from the result rather than raising.
+
+    Parameters:
+    - track_type: one of "video", "audio", "subtitle". Defaults to "video".
+    - track_index: 1-based track index.
+    - item_index: 0-based index of the item within that track's item list.
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        result: dict = {}
+        if hasattr(item, "GetStereoConvergenceValues"):
+            result["convergence"] = item.GetStereoConvergenceValues()
+        if hasattr(item, "GetStereoLeftFloatingWindowParams"):
+            result["left_floating_window"] = item.GetStereoLeftFloatingWindowParams()
+        if hasattr(item, "GetStereoRightFloatingWindowParams"):
+            result["right_floating_window"] = item.GetStereoRightFloatingWindowParams()
+        if not result:
+            return "Error: Stereo 3D parameters are not available on this timeline item."
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"

@@ -13,6 +13,13 @@ reading tools (nodes) inside a comp attached to a timeline item — plus two
 module-level accessors (:func:`_get_fusion_comp` and :func:`_resolve_tool`)
 that sibling modules (``tools/keyframes.py``, ``tools/fx_plugins.py``) reuse.
 
+On top of the node engine it hosts three comp-authoring tools:
+``set_title_text`` (locate the Text+ node by ``TOOLS_RegID`` and update its
+``StyledText``/``Size``/``Center``), ``apply_macro_to_clip`` (apply a
+``.setting`` macro to a clip's comp via a FILE round-trip — never passing an
+in-memory settings table across the bridge), and ``execute_fusion_lua`` (a Lua
+escape hatch via ``Resolve.Fusion().Execute``).
+
 Per the ownership contract, ``insert_fusion_generator`` and
 ``insert_fusion_title`` (playhead-insert operations) live in
 ``tools/timeline_edit.py``, not here.
@@ -25,6 +32,7 @@ All tools reach Resolve lazily via ``_conn()``/``_require_timeline()``/
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, List, Optional
 
 from ..app import mcp
@@ -647,5 +655,187 @@ def fusion_list_inputs(
             "input_count": len(result),
             "inputs": result,
         }, indent=2)
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ── Comp-authoring tools (title text, macro apply, Lua escape hatch) ───────
+
+
+@mcp.tool()
+def set_title_text(
+    text: str,
+    size: Optional[float] = None,
+    center_x: Optional[float] = None,
+    center_y: Optional[float] = None,
+    comp_index: int = 1,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Set the text (and optional Size/Center) of a Text+ title on a clip.
+
+    Locates the ``TextPlus`` node inside the timeline item's Fusion comp by
+    iterating ``comp.GetToolList()`` and matching ``GetAttrs('TOOLS_RegID')``
+    == ``'TextPlus'``, then ``SetInput('StyledText', text)`` — plus
+    ``SetInput('Size', size)`` and ``SetInput('Center', {1: x, 2: y})`` when
+    those are supplied.
+
+    A clip with no Fusion composition, or a comp with no Text+ node, returns a
+    clear ``'No Text+ tool'`` message rather than raising.
+
+    Parameters:
+    - text: the styled text to display.
+    - size: optional Text+ ``Size`` input (relative font size, e.g. 0.08).
+    - center_x / center_y: optional normalized ``Center`` position (0..1);
+      both must be supplied to move the text.
+    - comp_index: 1-based Fusion composition index on the item (default: 1).
+    - track_type: "video" (default), "audio", or "subtitle".
+    - track_index: 1-based track index (default: 1).
+    - item_index: 0-based index of the item within that track (default: 0).
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        try:
+            name = item.GetName()
+        except Exception:
+            name = "?"
+
+        comp = None
+        try:
+            comp = item.GetFusionCompByIndex(comp_index)
+        except Exception:
+            comp = None
+        if comp is None:
+            return (
+                f"No Text+ tool: '{name}' has no Fusion composition at index "
+                f"{comp_index}."
+            )
+
+        tools = comp.GetToolList() or {}
+        text_tool = None
+        for tool in tools.values():
+            try:
+                if tool.GetAttrs("TOOLS_RegID") == "TextPlus":
+                    text_tool = tool
+                    break
+            except Exception:
+                continue
+        if text_tool is None:
+            return (
+                f"No Text+ tool found in the Fusion composition on '{name}'."
+            )
+
+        text_tool.SetInput("StyledText", text)
+        if size is not None:
+            text_tool.SetInput("Size", size)
+        if center_x is not None and center_y is not None:
+            text_tool.SetInput("Center", {1: center_x, 2: center_y})
+
+        return json.dumps({
+            "success": True,
+            "item_name": name,
+            "styled_text": text,
+            "size": size,
+            "center": (
+                {"x": center_x, "y": center_y}
+                if center_x is not None and center_y is not None
+                else None
+            ),
+        }, indent=2, default=str)
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def apply_macro_to_clip(
+    setting_path: str,
+    comp_index: int = 1,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Apply a Fusion ``.setting`` macro to a clip's composition (file round-trip).
+
+    The macro is applied via a FILE round-trip — the ``.setting`` file is read
+    by Resolve/Fusion directly, never by passing an in-memory settings table
+    across the bridge. It first tries ``TimelineItem.ImportFusionComp`` and, if
+    that fails, falls back to loading the settings onto the clip's comp via
+    ``comp.LoadSettings(setting_path)``.
+
+    A missing or invalid ``.setting`` path returns an ``'Error'`` string.
+
+    Parameters:
+    - setting_path: absolute path to the ``.setting`` (or ``.comp``) macro file.
+    - comp_index: 1-based Fusion composition index on the item (default: 1).
+    - track_type: "video" (default), "audio", or "subtitle".
+    - track_index: 1-based track index (default: 1).
+    - item_index: 0-based index of the item within that track (default: 0).
+    """
+    try:
+        if not setting_path or not os.path.isfile(setting_path):
+            return (
+                f"Error: .setting file not found at '{setting_path}'. "
+                f"Provide an absolute path to an existing macro file."
+            )
+
+        item = _get_timeline_item(track_type, track_index, item_index)
+        try:
+            name = item.GetName()
+        except Exception:
+            name = "?"
+
+        # Preferred path: import the macro file straight onto the timeline item.
+        result = None
+        try:
+            result = item.ImportFusionComp(setting_path)
+        except Exception:
+            result = None
+        if result:
+            return _ok(
+                result,
+                f"Applied macro '{setting_path}' to '{name}' via "
+                f"ImportFusionComp",
+                f"Error: Failed to apply macro '{setting_path}' to '{name}'.",
+            )
+
+        # Fallback: add/get the clip's comp and load the settings from file.
+        comp = _get_fusion_comp(item, comp_index)
+        loaded = comp.LoadSettings(setting_path)
+        return _ok(
+            loaded,
+            f"Applied macro '{setting_path}' to '{name}' via "
+            f"comp.LoadSettings",
+            f"Error: Failed to apply macro '{setting_path}' to '{name}'. "
+            f"Check that the file is a valid Fusion .setting.",
+        )
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def execute_fusion_lua(script: str) -> str:
+    """Execute a Lua script in DaVinci Resolve's Fusion (escape hatch).
+
+    Obtains the Fusion object via ``Resolve.Fusion()`` and returns
+    ``str(fusion.Execute(script))``. When Fusion is unavailable (Resolve not
+    reachable or ``Resolve.Fusion()`` returns ``None``), it returns
+    ``'Fusion is not available'`` rather than raising.
+
+    Parameters:
+    - script: the Lua script to execute in the Fusion context.
+    """
+    try:
+        resolve = _conn().get_resolve()
+        if resolve is None:
+            return "Fusion is not available"
+        try:
+            fusion = resolve.Fusion()
+        except Exception:
+            fusion = None
+        if fusion is None:
+            return "Fusion is not available"
+        result = fusion.Execute(script)
+        return str(result) if result is not None else "Script executed successfully."
     except Exception as e:
         return f"Error: {e}"

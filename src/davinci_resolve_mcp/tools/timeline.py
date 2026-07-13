@@ -409,6 +409,36 @@ def get_track_lock(track_type: str, track_index: int) -> str:
         return f"Error: {e}"
 
 
+@mcp.tool()
+def get_track_sub_type(track_type: str, track_index: int) -> str:
+    """Get the sub-type of a specific track on the current timeline.
+
+    For audio tracks this reports the channel layout (e.g. "mono", "stereo",
+    "5.1", "adaptive"); for other track types Resolve typically returns an
+    empty string. Wraps ``Timeline.GetTrackSubType(track_type, track_index)``.
+
+    Parameters:
+    - track_type: "video", "audio", or "subtitle".
+    - track_index: 1-based track index.
+    """
+    try:
+        _validate_track_type(track_type)
+        timeline = _timeline()
+        if not hasattr(timeline, "GetTrackSubType"):
+            return "Error: GetTrackSubType is not available on this timeline object."
+        sub_type = timeline.GetTrackSubType(track_type, track_index)
+        return json.dumps(
+            {
+                "track_type": track_type,
+                "track_index": track_index,
+                "sub_type": sub_type,
+            },
+            default=str,
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
 # ── Timeline items ────────────────────────────────────────────────────────
 
 
@@ -485,6 +515,33 @@ def get_start_timecode() -> str:
         timeline = _timeline()
         tc = timeline.GetStartTimecode()
         return tc or "Error: Could not read the timeline's start timecode."
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_start_timecode(timecode: str) -> str:
+    """Set the start timecode of the current timeline (its frame-0 timecode).
+
+    Complements the read-only get_start_timecode(). Wraps
+    ``Timeline.SetStartTimecode(timecode)``.
+
+    Parameters:
+    - timecode: timecode string in "HH:MM:SS:FF" format, e.g. "01:00:00:00".
+    """
+    try:
+        if not timecode or not timecode.strip():
+            return "Error: timecode must be a non-empty string."
+        timeline = _timeline()
+        if not hasattr(timeline, "SetStartTimecode"):
+            return "Error: SetStartTimecode is not available on this timeline object."
+        result = timeline.SetStartTimecode(timecode)
+        return _ok(
+            result,
+            f"Timeline start timecode set to {timecode}.",
+            f"Error: Failed to set the timeline start timecode to {timecode}. "
+            "Check the \"HH:MM:SS:FF\" format.",
+        )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
 
@@ -654,6 +711,81 @@ def set_clips_linked(clips: list[dict] | None = None, linked: bool = True) -> st
             result,
             f"{action.capitalize()} {len(items)} timeline items.",
             f"Error: Failed to set {len(items)} timeline items as {action}.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Import into the current timeline ──────────────────────────────────────
+
+
+@mcp.tool()
+def import_into_timeline(
+    file_path: str,
+    auto_import_source_clips_into_media_pool: bool | None = None,
+    ignore_file_extensions_when_matching: bool | None = None,
+    link_to_source_camera_files: bool | None = None,
+    use_sizing_info: bool | None = None,
+    import_multi_channel_audio_tracks_as_linked_groups: bool | None = None,
+    insert_additional_tracks: bool | None = None,
+    insert_with_offset: str | None = None,
+    source_clips_path: str | None = None,
+) -> str:
+    """Import (merge) items from an AAF/EDL/XML/DRT file INTO the current timeline.
+
+    Distinct from import_timeline_from_file, which creates a NEW timeline:
+    this wraps ``Timeline.ImportIntoTimeline(file_path, importOptions)`` and
+    merges the imported items into the timeline that is already open.
+
+    Only the options you explicitly set are forwarded to Resolve — every
+    kwarg left at its ``None`` default is dropped from importOptions so
+    Resolve applies its own defaults.
+
+    Parameters:
+    - file_path: path to the AAF/EDL/XML/DRT file to import. Required.
+    - auto_import_source_clips_into_media_pool: import source clips into the
+      media pool (Resolve default: True).
+    - ignore_file_extensions_when_matching: ignore file extensions when
+      matching source clips (Resolve default: False).
+    - link_to_source_camera_files: link to source camera files
+      (Resolve default: False).
+    - use_sizing_info: apply sizing information from the file
+      (Resolve default: False).
+    - import_multi_channel_audio_tracks_as_linked_groups: import
+      multi-channel audio as linked groups (Resolve default: False).
+    - insert_additional_tracks: insert additional tracks as needed
+      (Resolve default: True).
+    - insert_with_offset: timecode offset for the insert, e.g. "00:00:00:00".
+    - source_clips_path: filesystem path to search for source clips.
+    """
+    try:
+        if not file_path or not file_path.strip():
+            return "Error: file_path must be a non-empty string."
+
+        # Map user-facing kwargs to Resolve's importOptions keys, dropping
+        # every option still at its None default so Resolve uses its own.
+        candidates = {
+            "autoImportSourceClipsIntoMediaPool": auto_import_source_clips_into_media_pool,
+            "ignoreFileExtensionsWhenMatching": ignore_file_extensions_when_matching,
+            "linkToSourceCameraFiles": link_to_source_camera_files,
+            "useSizingInfo": use_sizing_info,
+            "importMultiChannelAudioTracksAsLinkedGroups": import_multi_channel_audio_tracks_as_linked_groups,
+            "insertAdditionalTracks": insert_additional_tracks,
+            "insertWithOffset": insert_with_offset,
+            "sourceClipsPath": source_clips_path,
+        }
+        import_options = {k: v for k, v in candidates.items() if v is not None}
+
+        timeline = _timeline()
+        if not hasattr(timeline, "ImportIntoTimeline"):
+            return "Error: ImportIntoTimeline is not available on this timeline object."
+        result = timeline.ImportIntoTimeline(file_path, import_options)
+        return _ok(
+            result,
+            f"Imported '{file_path}' into the current timeline"
+            + (f" (options: {json.dumps(import_options)})." if import_options else "."),
+            f"Error: Failed to import '{file_path}' into the current timeline. "
+            "Check that the path exists and is a supported AAF/EDL/XML/DRT file.",
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"

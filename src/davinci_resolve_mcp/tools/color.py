@@ -34,6 +34,17 @@ _NO_GRAPH_MSG = (
 
 _VERSION_TYPES = {0: "local", 1: "remote"}
 
+# Human-readable cache_mode -> the constant name Resolve exposes on the
+# top-level Resolve object (Graph.SetNodeCacheMode expects that constant).
+_CACHE_MODES = {
+    "auto": "CACHE_AUTO_ENABLED",
+    "disabled": "CACHE_DISABLED",
+    "enabled": "CACHE_ENABLED",
+}
+
+# Graph.GetNodeCacheMode returns an int; decode it back to a name.
+_CACHE_MODE_NAMES = {-1: "auto", 0: "disabled", 1: "enabled"}
+
 # Human-readable export_type -> the constant name Resolve exposes on the
 # top-level Resolve object (TimelineItem.ExportLUT expects that constant).
 _EXPORT_LUT_TYPES = {
@@ -330,6 +341,142 @@ def reset_all_grades(
             result,
             "All grades reset.",
             "Failed to reset grades.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_node_cache_mode(
+    node_index: int,
+    cache_mode: str,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Set the render-cache mode of a node in a clip's color node graph.
+
+    Parameters:
+    - node_index: 1-based node index (1 <= node_index <= get_num_nodes()).
+    - cache_mode: one of "auto", "disabled", or "enabled" (case-insensitive).
+    - track_type: "video", "audio", or "subtitle" (default "video").
+    - track_index: 1-based track index (default 1).
+    - item_index: 0-based item index within that track (default 0).
+    """
+    try:
+        canonical, err = _check_choice(
+            cache_mode, tuple(_CACHE_MODES.keys()), "cache_mode"
+        )
+        if err:
+            return err
+
+        _item, graph = _get_graph(track_type, track_index, item_index)
+        if graph is None:
+            return _NO_GRAPH_MSG
+
+        attr = _CACHE_MODES[canonical]
+        mode_value = getattr(_conn().get_resolve(), attr, None)
+        if mode_value is None:
+            return (
+                f"Cache mode '{canonical}' ({attr}) is not available in this "
+                "Resolve version."
+            )
+
+        result = graph.SetNodeCacheMode(node_index, mode_value)
+        return _ok(
+            result,
+            f"Node {node_index} cache mode set to '{canonical}'.",
+            f"Failed to set cache mode on node {node_index}. Check that "
+            "node_index is valid.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_node_cache_mode(
+    node_index: int,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Get the render-cache mode of a node in a clip's color node graph, as JSON.
+
+    Returns an object with the raw int ``mode`` and a decoded ``name``
+    ("auto" = -1, "disabled" = 0, "enabled" = 1).
+
+    Parameters:
+    - node_index: 1-based node index (1 <= node_index <= get_num_nodes()).
+    - track_type: "video", "audio", or "subtitle" (default "video").
+    - track_index: 1-based track index (default 1).
+    - item_index: 0-based item index within that track (default 0).
+    """
+    try:
+        _item, graph = _get_graph(track_type, track_index, item_index)
+        if graph is None:
+            return _NO_GRAPH_MSG
+        mode = graph.GetNodeCacheMode(node_index)
+        name = _CACHE_MODE_NAMES.get(mode, f"unknown({mode})")
+        return json.dumps({"mode": mode, "name": name}, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_tools_in_node(
+    node_index: int,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Get the list of tool names used in a node of a clip's color node graph.
+
+    Returns a JSON array of tool-name strings (empty when the node uses no
+    tools).
+
+    Parameters:
+    - node_index: 1-based node index (1 <= node_index <= get_num_nodes()).
+    - track_type: "video", "audio", or "subtitle" (default "video").
+    - track_index: 1-based track index (default 1).
+    - item_index: 0-based item index within that track (default 0).
+    """
+    try:
+        _item, graph = _get_graph(track_type, track_index, item_index)
+        if graph is None:
+            return _NO_GRAPH_MSG
+        tools = graph.GetToolsInNode(node_index)
+        return json.dumps(list(tools) if tools else [], indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def apply_arri_cdl_lut(
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Apply the ARRI CDL and LUT to a clip's color node graph.
+
+    Reads the ARRI CDL/LUT metadata carried by the clip's source media and
+    applies it to the node graph. Requires the Color page to be active with
+    the clip loaded, and the clip must carry ARRI CDL/LUT metadata.
+
+    Parameters:
+    - track_type: "video", "audio", or "subtitle" (default "video").
+    - track_index: 1-based track index (default 1).
+    - item_index: 0-based item index within that track (default 0).
+    """
+    try:
+        _item, graph = _get_graph(track_type, track_index, item_index)
+        if graph is None:
+            return _NO_GRAPH_MSG
+        result = graph.ApplyArriCdlLut()
+        return _ok(
+            result,
+            "Applied the ARRI CDL and LUT to the node graph.",
+            "Failed to apply the ARRI CDL and LUT. Make sure the clip carries "
+            "ARRI CDL/LUT metadata and the Color page is active.",
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"

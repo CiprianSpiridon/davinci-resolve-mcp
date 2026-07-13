@@ -25,6 +25,9 @@ Fairlight mixing / preset tools:
 - ``insert_audio_at_playhead``
   (``Project.InsertAudioToCurrentTrackAtPlayhead``) — insert an audio file at
   the playhead on the selected Fairlight track.
+- ``generate_speech`` (``Project.GenerateSpeech``) — Studio Neural-Engine
+  text-to-speech (Resolve 20+). hasattr-guarded to degrade gracefully on
+  Resolve Free / versions before 20 that lack the API.
 
 All tools reach Resolve lazily via ``_conn()``/``_require_timeline()`` inside
 their bodies — nothing here imports ``DaVinciResolveScript`` or touches a
@@ -293,6 +296,99 @@ def insert_audio_at_playhead(
             f"Fairlight track.",
             "Error: Failed to insert audio. Ensure the Fairlight page is "
             "active with a track selected.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── AI Neural-Engine speech synthesis ───────────────────────────────────
+
+
+@mcp.tool()
+def generate_speech(
+    text_input: str,
+    voice_model: str = "Female 1",
+    speed: int = 0,
+    pitch: int = 0,
+    variation: int = 0,
+    filename: str = "",
+    add_to_timeline: bool = True,
+    audio_track: int = 1,
+    timecode: str = "00:00:00:00",
+) -> str:
+    """Synthesize speech (text-to-speech) via the DaVinci Neural Engine.
+
+    Assembles a ``speechGenerationSettings`` dictionary and calls
+    ``Project.GenerateSpeech(settings, timecode)``. The generated audio is
+    imported as a MediaPoolItem and, when ``add_to_timeline`` is True, placed
+    on the given audio track at ``timecode`` on the current timeline.
+
+    Requires DaVinci Resolve Studio 20+; on Free (or older Resolve versions
+    without ``Project.GenerateSpeech``) an explanatory string is returned
+    instead of raising.
+
+    Parameters:
+    - text_input: The text to speak (maximum 350 characters).
+    - voice_model: Voice preset, e.g. "Female 1", "Male 1", or a custom voice
+      name (default: "Female 1").
+    - speed: Speaking-rate adjustment (default: 0).
+    - pitch: Pitch adjustment (default: 0).
+    - variation: Expressive-variation amount (default: 0).
+    - filename: Output filename for the generated audio (default: "", meaning
+      Resolve chooses one).
+    - add_to_timeline: True to place the clip on the timeline at ``timecode``
+      (default: True).
+    - audio_track: 1-based audio track for placement when adding to the
+      timeline (default: 1).
+    - timecode: Timeline timecode at which to add the clip (default:
+      "00:00:00:00").
+    """
+    try:
+        if not isinstance(text_input, str) or not text_input.strip():
+            return "Error: text_input must be a non-empty string of speech text."
+        if len(text_input) > 350:
+            return (
+                f"Error: text_input is {len(text_input)} characters — the "
+                "Neural Engine limit is 350. Shorten the text and retry."
+            )
+
+        conn = _conn()
+        project = conn.get_project()
+        if not hasattr(project, "GenerateSpeech"):
+            return (
+                "Speech generation is not available in this Resolve version "
+                "(Project.GenerateSpeech is missing; requires DaVinci Resolve "
+                "Studio 20+)."
+            )
+
+        settings = {
+            "TextInput": text_input,
+            "VoiceModel": voice_model,
+            "Speed": int(speed),
+            "Pitch": int(pitch),
+            "Variation": int(variation),
+            "Filename": filename,
+            "AddToTimeline": bool(add_to_timeline),
+            "AudioTrack": int(audio_track),
+        }
+        item = project.GenerateSpeech(settings, timecode)
+        if item is None:
+            return (
+                "Error: Speech generation failed (Project.GenerateSpeech "
+                "returned None). Check the voice model, timecode, and that "
+                "the Neural Engine is available."
+            )
+
+        name = item.GetName() if hasattr(item, "GetName") else None
+        return json.dumps(
+            {
+                "generated": True,
+                "media_pool_item": name,
+                "voice_model": voice_model,
+                "added_to_timeline": bool(add_to_timeline),
+                "audio_track": int(audio_track),
+                "timecode": timecode,
+            }
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"

@@ -650,3 +650,178 @@ def clear_clip_mark_in_out(clip_name: str) -> str:
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
+
+
+# ── Neural-Engine / AI per-clip analysis ─────────────────────────────────
+#
+# Every tool in this section wraps a MediaPoolItem method that is gated behind
+# Resolve Studio *and* the relevant Neural-Engine "Extras" package (AI
+# IntelliSearch, AI Slate ID, audio classification, motion-deblur models).
+# When Studio or the model package is missing, Resolve returns a falsy result
+# (``False`` / ``None``) rather than raising — so a naive ``if result`` would
+# read that as "nothing to do". We deliberately treat any falsy result as a
+# failure and surface an actionable "requires Resolve Studio / Neural Engine
+# Extras" message, and we never report a false success.
+
+
+@mcp.tool()
+def analyze_for_intellisearch(
+    clip_name: str,
+    identify_faces: bool = False,
+    better_mode: bool = False,
+) -> str:
+    """Run Neural-Engine IntelliSearch analysis on a media pool clip.
+
+    Wraps ``MediaPoolItem.AnalyzeForIntellisearch(identifyFaces, isBetterMode)``.
+    Requires Resolve Studio and the AI IntelliSearch model package
+    ("Faster" for the default mode, "Better" when ``better_mode`` is True).
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the current media pool
+      folder.
+    - identify_faces: whether to also identify faces during analysis.
+    - better_mode: use the higher-quality "Better" IntelliSearch model instead
+      of the default "Faster" model.
+    """
+    try:
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "AnalyzeForIntellisearch"):
+            return "Error: AnalyzeForIntellisearch is not available on this clip object."
+        result = clip.AnalyzeForIntellisearch(identify_faces, better_mode)
+        return _ok(
+            result,
+            f"Ran IntelliSearch analysis on clip '{clip_name}' "
+            f"(identify_faces={identify_faces}, better_mode={better_mode}).",
+            f"Error: IntelliSearch analysis on clip '{clip_name}' did not run. "
+            "This requires Resolve Studio and the AI IntelliSearch Neural Engine "
+            "Extras package ('Faster' or 'Better') to be installed; install it "
+            "via DaVinci Resolve > Preferences > System > Neural Engine.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def analyze_for_slate(clip_name: str, marker_color: str) -> str:
+    """Run Neural-Engine Slate (clapperboard) analysis on a media pool clip.
+
+    Wraps ``MediaPoolItem.AnalyzeForSlate(markerColor)``. Requires Resolve
+    Studio and the AI Slate ID model package. Detected slates are tagged with
+    a marker of the given color.
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the current media pool
+      folder.
+    - marker_color: color for the markers placed at detected slates, e.g.
+      "Blue", "Cyan", "Green", "Yellow", "Red", "Pink", "Purple", "Fuchsia",
+      "Rose", "Lavender", "Sky", "Mint", "Lemon", "Sand", "Cocoa", "Cream".
+    """
+    try:
+        marker_color, err = _check_choice(marker_color, MARKER_COLORS, "marker color")
+        if err:
+            return err
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "AnalyzeForSlate"):
+            return "Error: AnalyzeForSlate is not available on this clip object."
+        result = clip.AnalyzeForSlate(marker_color)
+        return _ok(
+            result,
+            f"Ran Slate analysis on clip '{clip_name}' "
+            f"(marker color {marker_color}).",
+            f"Error: Slate analysis on clip '{clip_name}' did not run. "
+            "This requires Resolve Studio and the AI Slate ID Neural Engine "
+            "Extras package to be installed; install it via DaVinci Resolve > "
+            "Preferences > System > Neural Engine.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def perform_audio_classification(clip_name: str) -> str:
+    """Run Neural-Engine audio classification on a media pool clip.
+
+    Wraps ``MediaPoolItem.PerformAudioClassification()``, which analyzes and
+    classifies the clip's audio into categories and subcategories. Requires
+    Resolve Studio and the audio classification Neural Engine model.
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the current media pool
+      folder.
+    """
+    try:
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "PerformAudioClassification"):
+            return "Error: PerformAudioClassification is not available on this clip object."
+        result = clip.PerformAudioClassification()
+        return _ok(
+            result,
+            f"Ran audio classification on clip '{clip_name}'.",
+            f"Error: Audio classification on clip '{clip_name}' did not run. "
+            "This requires Resolve Studio and the audio classification Neural "
+            "Engine Extras package to be installed; install it via DaVinci "
+            "Resolve > Preferences > System > Neural Engine.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def remove_motion_blur(clip_name: str, deblur_option: int = 0) -> str:
+    """Apply Neural-Engine motion deblur to a media pool clip.
+
+    Wraps ``MediaPoolItem.RemoveMotionBlur(deblurOption)``, which renders a new
+    deblurred MediaPoolItem and returns it on success. Requires Resolve Studio
+    and the motion-deblur Neural Engine model.
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the current media pool
+      folder.
+    - deblur_option: motion-deblur setting passed through to the Resolve API
+      (default 0). See the "Motion Deblur Settings" section of the Resolve
+      scripting docs for supported values.
+    """
+    try:
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "RemoveMotionBlur"):
+            return "Error: RemoveMotionBlur is not available on this clip object."
+        result = clip.RemoveMotionBlur(deblur_option)
+        return _ok(
+            result,
+            f"Applied motion deblur to clip '{clip_name}' "
+            f"(deblur_option={deblur_option}); a new deblurred clip was created.",
+            f"Error: Motion deblur on clip '{clip_name}' did not run. "
+            "This requires Resolve Studio and the motion-deblur Neural Engine "
+            "Extras package to be installed; install it via DaVinci Resolve > "
+            "Preferences > System > Neural Engine.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def monitor_growing_file(clip_name: str) -> str:
+    """Monitor a growing (still-being-written) file for a media pool clip.
+
+    Wraps ``MediaPoolItem.MonitorGrowingFile()``, which watches the clip's
+    source file and keeps updating it as long as it keeps growing, stopping
+    once the file stops growing for a while. Requires Resolve Studio.
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the current media pool
+      folder.
+    """
+    try:
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "MonitorGrowingFile"):
+            return "Error: MonitorGrowingFile is not available on this clip object."
+        result = clip.MonitorGrowingFile()
+        return _ok(
+            result,
+            f"Monitoring growing file for clip '{clip_name}'.",
+            f"Error: Could not start monitoring the growing file for clip "
+            f"'{clip_name}'. This requires Resolve Studio; check that the clip's "
+            "source media is a growing/still-writing file.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
