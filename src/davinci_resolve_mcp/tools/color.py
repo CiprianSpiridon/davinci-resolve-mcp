@@ -1024,3 +1024,69 @@ def get_color_group_node_graph(group_name: str, stage: str = "pre") -> str:
         return json.dumps(node_graph_to_dict(graph), indent=2, default=str)
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
+
+
+# ── Timeline-level color (Dolby Vision / timeline node graph) ─────────────
+
+
+@mcp.tool()
+def analyze_dolby_vision(blend_shots: bool = False) -> str:
+    """Analyze Dolby Vision metadata across the current timeline's clips.
+
+    Runs ``Timeline.AnalyzeDolbyVision`` over every clip in the current
+    timeline (an empty item list analyzes all clips). Requires a Dolby
+    Vision-configured project; returns a clear message when there's no
+    active timeline.
+
+    Parameters:
+    - blend_shots: when True, passes Resolve's ``DLB_BLEND_SHOTS`` analysis
+      type so shots are blended during analysis (default False, analyze each
+      clip independently).
+    """
+    try:
+        conn = _conn()
+        timeline = conn.get_current_timeline()
+        if timeline is None:
+            return "No active timeline. Create or open a timeline first."
+        if blend_shots:
+            analysis_type = getattr(
+                conn.get_resolve(), "DLB_BLEND_SHOTS", None
+            )
+            if analysis_type is None:
+                return (
+                    "Blend-shots analysis (DLB_BLEND_SHOTS) is not available "
+                    "in this Resolve version."
+                )
+            result = timeline.AnalyzeDolbyVision([], analysis_type)
+        else:
+            result = timeline.AnalyzeDolbyVision([])
+        return _ok(
+            result,
+            "Started Dolby Vision analysis on the current timeline"
+            f"{' (blending shots)' if blend_shots else ''}.",
+            "Failed to start Dolby Vision analysis. Make sure the project is "
+            "configured for Dolby Vision and the timeline has clips.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_timeline_node_graph() -> str:
+    """Get the current timeline's node graph (timeline-level grade), as JSON.
+
+    Returns the ``Timeline.GetNodeGraph()`` graph — the timeline-wide node
+    graph, distinct from a single clip's graph (see get_node_graph). The
+    graph is only available while the Color page is active; returns a clear
+    message otherwise, or when there's no active timeline.
+    """
+    try:
+        timeline = _conn().get_current_timeline()
+        if timeline is None:
+            return "No active timeline. Create or open a timeline first."
+        graph = timeline.GetNodeGraph()
+        if graph is None:
+            return _NO_GRAPH_MSG
+        return json.dumps(node_graph_to_dict(graph), indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
