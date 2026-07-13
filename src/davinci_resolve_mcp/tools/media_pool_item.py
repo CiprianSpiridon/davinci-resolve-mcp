@@ -210,20 +210,18 @@ def set_clip_metadata(clip_name: str, metadata_type: str, metadata_value: str) -
     - clip_name: name of the clip, as it appears in the current media pool
       folder.
     - metadata_type: metadata key to set (e.g. "Camera Type", "Shot", "Scene").
-    - metadata_value: new value as a string. Numeric-looking strings are
-      coerced to int/float and "true"/"false" to bool before being passed to
-      the Resolve API; anything else is passed through as a string.
+    - metadata_value: new value as a string, passed through to the Resolve API
+      unchanged.
     """
     try:
         clip = _find_clip(clip_name)
         if not hasattr(clip, "SetMetadata"):
             return "Error: SetMetadata is not available on this clip object."
-        coerced = _coerce_value(metadata_value)
-        result = clip.SetMetadata(metadata_type, coerced)
+        result = clip.SetMetadata(metadata_type, metadata_value)
         return _ok(
             result,
-            f"Set metadata '{metadata_type}' = {coerced!r} on clip '{clip_name}'.",
-            f"Error: Failed to set metadata '{metadata_type}' = {coerced!r} on "
+            f"Set metadata '{metadata_type}' = {metadata_value!r} on clip '{clip_name}'.",
+            f"Error: Failed to set metadata '{metadata_type}' = {metadata_value!r} on "
             f"clip '{clip_name}'. The key may be invalid or read-only.",
         )
     except Exception as e:  # noqa: BLE001
@@ -276,20 +274,17 @@ def set_third_party_metadata(clip_name: str, key: str, value: str) -> str:
     - clip_name: name of the clip, as it appears in the current media pool
       folder.
     - key: third-party metadata key to set.
-    - value: new value as a string. Numeric-looking strings are coerced to
-      int/float and "true"/"false" to bool before being passed to the Resolve
-      API; anything else is passed through as a string.
+    - value: new value as a string, passed through to the Resolve API unchanged.
     """
     try:
         clip = _find_clip(clip_name)
         if not hasattr(clip, "SetThirdPartyMetadata"):
             return "Error: SetThirdPartyMetadata is not available on this clip object."
-        coerced = _coerce_value(value)
-        result = clip.SetThirdPartyMetadata(key, coerced)
+        result = clip.SetThirdPartyMetadata(key, value)
         return _ok(
             result,
-            f"Set third-party metadata '{key}' = {coerced!r} on clip '{clip_name}'.",
-            f"Error: Failed to set third-party metadata '{key}' = {coerced!r} on "
+            f"Set third-party metadata '{key}' = {value!r} on clip '{clip_name}'.",
+            f"Error: Failed to set third-party metadata '{key}' = {value!r} on "
             f"clip '{clip_name}'. The key may be invalid or read-only.",
         )
     except Exception as e:  # noqa: BLE001
@@ -864,7 +859,7 @@ def perform_audio_classification(clip_name: str) -> str:
 
 
 @mcp.tool()
-def remove_motion_blur(clip_name: str, deblur_option: int = 0) -> str:
+def remove_motion_blur(clip_name: str, deblur_option: dict | None = None) -> str:
     """Apply Neural-Engine motion deblur to a media pool clip.
 
     Wraps ``MediaPoolItem.RemoveMotionBlur(deblurOption)``, which renders a new
@@ -874,19 +869,20 @@ def remove_motion_blur(clip_name: str, deblur_option: int = 0) -> str:
     Parameters:
     - clip_name: name of the clip, as it appears in the current media pool
       folder.
-    - deblur_option: motion-deblur setting passed through to the Resolve API
-      (default 0). See the "Motion Deblur Settings" section of the Resolve
-      scripting docs for supported values.
+    - deblur_option: optional Motion-Deblur render-settings dict passed through
+      to the Resolve API. Supported keys: FileName, Format, Codec,
+      EncodingProfile, UseExtremeMode, UseMarkInMarkOut, RenderAtSourceRes,
+      UseMoreGpuMemory, Encoder. Omit or pass an empty dict to use defaults.
     """
     try:
         clip = _find_clip(clip_name)
         if not hasattr(clip, "RemoveMotionBlur"):
             return "Error: RemoveMotionBlur is not available on this clip object."
-        result = clip.RemoveMotionBlur(deblur_option)
+        result = clip.RemoveMotionBlur(deblur_option or {})
         return _ok(
             result,
-            f"Applied motion deblur to clip '{clip_name}' "
-            f"(deblur_option={deblur_option}); a new deblurred clip was created.",
+            f"Applied motion deblur to clip '{clip_name}'; "
+            f"a new deblurred clip was created.",
             f"Error: Motion deblur on clip '{clip_name}' did not run. "
             "This requires Resolve Studio and the motion-deblur Neural Engine "
             "Extras package to be installed; install it via DaVinci Resolve > "

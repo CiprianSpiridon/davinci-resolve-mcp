@@ -227,7 +227,14 @@ def fusion_add_keyframe(
         keyed = False
         if spline is not None:
             try:
-                spline.SetKeyFrames({key_frame: coerced}, bool(replace))
+                # BezierSpline.SetKeyFrames expects a table of subtables whose
+                # first element is the keyframe value (frame -> {value}). In the
+                # Fusion Python bridge a list becomes a Lua array-table, so
+                # ``[coerced]`` serializes to ``[key_frame] = { coerced }`` —
+                # the documented "simple keyframe" form. A bare scalar
+                # (``{key_frame: coerced}``) is the wrong shape and is silently
+                # dropped by the bridge.
+                spline.SetKeyFrames({key_frame: [coerced]}, bool(replace))
                 keyed = True
             except Exception:
                 keyed = False

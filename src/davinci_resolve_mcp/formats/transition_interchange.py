@@ -419,7 +419,11 @@ def author_dissolve_fcpxml(
             )
             spine_items.append({"ref": aid, "clip": clip, "frames": frames, "offset": offset})
             offset += frames
-        spine_items[-1]["dissolve"] = cut["dissolve"]
+        # Attach the dissolve to the BEFORE clip ([-2]); the "after" clip is
+        # [-1]. The offset formula item["offset"] + item["frames"] - half then
+        # centres the <transition> on the cut and emits it between the two
+        # <asset-clip> elements.
+        spine_items[-2]["dissolve"] = cut["dissolve"]
 
     library = ET.SubElement(fcpxml, "library")
     event = ET.SubElement(library, "event", {"name": name})

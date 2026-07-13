@@ -502,9 +502,12 @@ def fusion_set_input(
 ) -> str:
     """Set a value on a Fusion tool input, verifying it by readback.
 
-    The string ``value`` is auto-coerced to int/float/bool where it looks
-    numeric/boolean (e.g. "1.0" -> 1, "true" -> True); otherwise it is passed
-    through as a string. After setting, the value is read back and compared.
+    For numeric/boolean inputs the string ``value`` is auto-coerced to
+    int/float/bool where it looks numeric/boolean (e.g. "1.0" -> 1,
+    "true" -> True); otherwise it is passed through as a string. Text inputs
+    (e.g. "StyledText") always receive the raw string verbatim — never coerced —
+    so literal values like "1.0" or "007" are preserved. After setting, the
+    value is read back and compared.
 
     If the readback does not match and ``value`` is a label string, an
     integer-index fallback is attempted: OFX/ResolveFX enum ("choice") inputs
@@ -524,7 +527,19 @@ def fusion_set_input(
         comp = _get_fusion_comp(item, comp_index)
         tool = _resolve_tool(comp, tool_name)
 
-        coerced = _coerce_value(value)
+        # Text/string inputs (e.g. StyledText) must receive the raw string —
+        # coercing would corrupt literal values like "1.0" -> 1 or "007" -> 7
+        # before Fusion ever sees them. Only coerce numeric/boolean inputs.
+        inp = _input_object(tool, input_name)
+        data_type = ""
+        try:
+            data_type = (inp.GetAttrs() or {}).get("INPS_DataType", "") if inp else ""
+        except Exception:
+            data_type = ""
+        if isinstance(data_type, str) and data_type.startswith("Text"):
+            coerced = value
+        else:
+            coerced = _coerce_value(value)
 
         def _set(v: Any) -> None:
             if time is not None:
@@ -760,8 +775,9 @@ def apply_macro_to_clip(
     The macro is applied via a FILE round-trip — the ``.setting`` file is read
     by Resolve/Fusion directly, never by passing an in-memory settings table
     across the bridge. It first tries ``TimelineItem.ImportFusionComp`` and, if
-    that fails, falls back to loading the settings onto the clip's comp via
-    ``comp.LoadSettings(setting_path)``.
+    that fails, falls back to loading the settings onto a target tool via
+    ``tool.LoadSettings(setting_path)`` (LoadSettings is an Operator/tool
+    method, not a Composition method).
 
     A missing or invalid ``.setting`` path returns an ``'Error'`` string.
 
@@ -799,13 +815,42 @@ def apply_macro_to_clip(
                 f"Error: Failed to apply macro '{setting_path}' to '{name}'.",
             )
 
-        # Fallback: add/get the clip's comp and load the settings from file.
+        # Fallback: load the settings from file onto a target tool. NOTE:
+        # LoadSettings is an Operator (tool) method, not a Composition method —
+        # ``comp.LoadSettings`` does not exist and always errors, so call it on
+        # a specific tool via a file round-trip instead.
         comp = _get_fusion_comp(item, comp_index)
-        loaded = comp.LoadSettings(setting_path)
+        target = None
+        try:
+            target = comp.ActiveTool
+        except Exception:
+            target = None
+        if not target:
+            # No active tool — fall back to any tool present in the comp.
+            try:
+                tools = comp.GetToolList(False) or {}
+                for _t in tools.values():
+                    target = _t
+                    break
+            except Exception:
+                target = None
+        if not target:
+            return (
+                f"Error: Failed to apply macro '{setting_path}' to '{name}'. "
+                f"No target tool available in the composition to load the "
+                f"setting onto."
+            )
+        try:
+            loaded = target.LoadSettings(setting_path)
+        except Exception as load_err:
+            return (
+                f"Error: Failed to apply macro '{setting_path}' to '{name}': "
+                f"{load_err}"
+            )
         return _ok(
             loaded,
             f"Applied macro '{setting_path}' to '{name}' via "
-            f"comp.LoadSettings",
+            f"tool.LoadSettings",
             f"Error: Failed to apply macro '{setting_path}' to '{name}'. "
             f"Check that the file is a valid Fusion .setting.",
         )

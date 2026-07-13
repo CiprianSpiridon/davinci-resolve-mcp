@@ -1432,7 +1432,8 @@ def import_stills(album_name: str, file_paths: list[str]) -> str:
         result = album.ImportStills(list(file_paths))
         return _ok(
             result,
-            f"Imported {len(file_paths)} still(s) into '{album_name}'.",
+            f"Imported stills into '{album_name}' from {len(file_paths)} "
+            f"path(s) (Resolve confirms at least one succeeded).",
             f"Failed to import stills into '{album_name}'. Check the paths "
             f"point to image files Resolve can read.",
         )

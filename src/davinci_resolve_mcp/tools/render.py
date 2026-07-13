@@ -393,7 +393,9 @@ def quick_export(preset_name: str, target_dir: str = "", custom_name: str = "") 
             params["CustomName"] = custom_name
 
         result = project.RenderWithQuickExport(preset_name, params)
-        if result:
+        # RenderWithQuickExport returns a dict on success; on failure it returns
+        # an error string (or None). Distinguish by type, not truthiness.
+        if isinstance(result, dict):
             return json.dumps(
                 {
                     "status": "rendering",
@@ -402,8 +404,9 @@ def quick_export(preset_name: str, target_dir: str = "", custom_name: str = "") 
                 },
                 indent=2,
             )
+        detail = f" Resolve reported: {result}" if result else ""
         return (
-            f"Failed to start Quick Export with preset '{preset_name}'. "
+            f"Failed to start Quick Export with preset '{preset_name}'.{detail} "
             "Check get_quick_export_presets() for valid names."
         )
     except Exception as e:

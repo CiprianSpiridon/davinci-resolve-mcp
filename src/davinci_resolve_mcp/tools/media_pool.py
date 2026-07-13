@@ -726,22 +726,19 @@ def create_stereo_clip(left_clip_name: str, right_clip_name: str) -> str:
 
 
 @mcp.tool()
-def convert_timeline_to_stereo(num_frames: int) -> str:
+def convert_timeline_to_stereo() -> str:
     """Convert the current timeline to stereoscopic 3D.
 
-    Calls ``Timeline.ConvertTimelineToStereo(num_frames)`` on the current
-    timeline.
-
-    Parameters:
-    - num_frames: number of frames in the timeline to convert.
+    Calls ``Timeline.ConvertTimelineToStereo()`` on the current timeline. The
+    Resolve API takes no arguments.
     """
     try:
         conn = _conn()
         timeline = _require_timeline(conn)
-        result = timeline.ConvertTimelineToStereo(num_frames)
+        result = timeline.ConvertTimelineToStereo()
         return _ok(
             result,
-            f"Converted the current timeline to stereoscopic 3D ({num_frames} frames).",
+            "Converted the current timeline to stereoscopic 3D.",
             "Error: Failed to convert the timeline to stereoscopic 3D.",
         )
     except Exception as e:  # noqa: BLE001
