@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -945,6 +946,286 @@ def discover_regid(tool_name: str = "") -> str:
                 "wireId": wire_id,
                 "tool_name": attrs.get("TOOLS_Name", wanted or ""),
                 "is_ofx": bool(wire_id is not None),
+            },
+            indent=2,
+            default=str,
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Custom effect authoring / install (filesystem writes; no Resolve) ────────
+# install_dctl / install_fuse drop a DCTL or Fuse SOURCE STRING into the exact
+# directory Resolve/Fusion scans, so a custom shader/plugin becomes available
+# without a running Resolve. They deliberately do NOT compile GLSL/DCTL/Lua —
+# a minimal non-empty source guard is all that runs; the follow-up step
+# (refresh_luts for a regular DCTL, a Resolve restart for ACES DCTLs and new
+# Fuses) is reported so the caller knows how to make Resolve pick the file up.
+# 23392, fuse @ 23156) and its utils/platform.get_resolve_plugin_paths.
+
+# A Fuse's on-disk name IS its class identifier — the Fuse SDK requires a valid
+# identifier, and a bad name produces comps that will not reopen.
+_FUSE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# DCTL filenames are looser than Fuse identifiers but must still be filesystem-
+# safe: no path separators, no leading dot, nothing shell-hostile.
+_DCTL_NAME_RE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_ \-]{0,127}$")
+
+# The DCTL categories install_dctl accepts and the file extensions it writes.
+_DCTL_CATEGORIES = ("lut", "aces_idt", "aces_odt")
+_DCTL_VALID_EXTS = (".dctl", ".dctle")
+
+
+def _plugin_install_paths() -> Dict[str, str]:
+    """Return the per-user install directories for Fuses and DCTLs.
+
+    Keys: ``fuses_dir`` (Fusion Fuses), ``dctl_lut_dir`` (regular DCTL/LUT
+    folder, picked up by RefreshLUTList), ``aces_idt_dir`` / ``aces_odt_dir``
+    (ACES Transforms trees, scanned only at Resolve startup). Paths are the
+    per-platform user defaults; the directory is created on write, not here.
+
+    NOTE: the Fuse SDK doc lists Fuses under ``Support/Fusion/Fuses`` on macOS,
+    but the directory Resolve actually scans is the sibling ``Fusion/Fuses``
+    (no ``Support``) — matching the canonical Fusion user-data layout where
+    Macros/Templates/Scripts/Fuses all hang directly off the Fusion user root.
+    """
+    home = os.path.expanduser("~")
+    if sys.platform.startswith("darwin"):
+        support = os.path.join(
+            home, "Library", "Application Support",
+            "Blackmagic Design", "DaVinci Resolve",
+        )
+        fuses_dir = os.path.join(support, "Fusion", "Fuses")
+        dctl_lut_dir = os.path.join(support, "LUT")
+        aces_root = os.path.join(support, "ACES Transforms")
+    elif sys.platform.startswith("win") or sys.platform.startswith("cygwin"):
+        appdata = os.environ.get(
+            "APPDATA", os.path.join(home, "AppData", "Roaming")
+        )
+        support = os.path.join(
+            appdata, "Blackmagic Design", "DaVinci Resolve", "Support"
+        )
+        fuses_dir = os.path.join(support, "Fusion", "Fuses")
+        dctl_lut_dir = os.path.join(support, "LUT")
+        aces_root = os.path.join(support, "ACES Transforms")
+    else:  # Linux / other POSIX
+        base = os.path.join(home, ".local", "share", "DaVinciResolve")
+        fuses_dir = os.path.join(base, "Fusion", "Fuses")
+        dctl_lut_dir = os.path.join(base, "LUT")
+        aces_root = os.path.join(base, "ACES Transforms")
+
+    return {
+        "fuses_dir": fuses_dir,
+        "dctl_lut_dir": dctl_lut_dir,
+        "aces_idt_dir": os.path.join(aces_root, "IDT"),
+        "aces_odt_dir": os.path.join(aces_root, "ODT"),
+    }
+
+
+def _dctl_root(category: str) -> str:
+    """Return the install root directory for a validated DCTL ``category``."""
+    paths = _plugin_install_paths()
+    if category == "lut":
+        return paths["dctl_lut_dir"]
+    if category == "aces_idt":
+        return paths["aces_idt_dir"]
+    return paths["aces_odt_dir"]  # aces_odt
+
+
+def _resolve_subdir(subdir: Optional[str]) -> Optional[str]:
+    """Validate an optional ``subdir`` and return it as a safe relative path.
+
+    Returns None for no subdir. Raises ``ValueError`` on any traversal, hidden,
+    or separator-bearing segment so a caller can never escape the install root.
+    """
+    if not subdir or not str(subdir).strip():
+        return None
+    normalized = str(subdir).replace("\\", "/")
+    parts = [p.strip() for p in normalized.split("/") if p.strip()]
+    if not parts:
+        return None
+    for part in parts:
+        if part in (".", "..") or "/" in part or "\\" in part:
+            raise ValueError(f"Unsafe subdir segment: '{part}'")
+        if part.startswith("."):
+            raise ValueError(f"Hidden subdir not allowed: '{part}'")
+    return os.path.join(*parts)
+
+
+@mcp.tool()
+def install_dctl(
+    name: str,
+    source: str,
+    category: str = "lut",
+    subdir: str = "",
+    ext: str = ".dctl",
+    overwrite: bool = False,
+) -> str:
+    """Write a DCTL source file into Resolve's LUT or ACES Transforms tree.
+
+    Filesystem write ONLY — no running Resolve required. The DCTL ``source`` is
+    written verbatim (NO GLSL/DCTL compilation is attempted); only a minimal
+    non-empty guard runs. Where it lands and what makes Resolve pick it up
+    depends on ``category``:
+    - "lut"      -> the regular LUT directory; call ``refresh_luts`` afterwards
+      and it appears in the LUT browser / Clip-Node LUT picker / ResolveFX DCTL.
+    - "aces_idt" -> ``ACES Transforms/IDT`` (a separate tree scanned ONLY at
+      Resolve startup — a Resolve RESTART is required, not a LUT refresh).
+    - "aces_odt" -> ``ACES Transforms/ODT`` (same restart caveat as IDT).
+
+    Parameters:
+    - name: filesystem-safe identifier — must match
+      ``[A-Za-z0-9_][A-Za-z0-9_ -]{0,127}`` (no path separators, no leading
+      dot). An unsafe or empty name is rejected and nothing is written.
+    - source: the DCTL source as a string. An empty/whitespace value is
+      rejected BEFORE any file is created.
+    - category: "lut" (default), "aces_idt", or "aces_odt".
+    - subdir: optional folder under the install root (each segment validated;
+      no ``..``/hidden/separator segments). Empty = install at the root.
+    - ext: ".dctl" (default) or ".dctle" (encrypted).
+    - overwrite: when False (default) an existing target file is left untouched
+      and an error is returned; pass True to replace it.
+
+    Returns a JSON object ``{success, path, category, next_step}`` on success,
+    or an ``Error: ...`` string on any failure — writing NOTHING when the name
+    is unsafe, the source is empty, or the target exists and overwrite is False.
+    """
+    try:
+        if not name or not _DCTL_NAME_RE.match(name):
+            return (
+                f"Error: invalid DCTL name '{name}'. Must match "
+                f"[A-Za-z0-9_][A-Za-z0-9_ -]{{0,127}} — no path separators, no "
+                f"leading dot. Nothing written."
+            )
+
+        if not isinstance(source, str) or not source.strip():
+            return (
+                "Error: source is required and must be a non-empty DCTL string. "
+                "Nothing written."
+            )
+
+        canonical_cat, err = _check_choice(category, _DCTL_CATEGORIES, "category")
+        if err:
+            return f"Error: {err}"
+
+        chosen_ext, ext_err = _check_choice(ext, _DCTL_VALID_EXTS, "ext")
+        if ext_err:
+            return f"Error: {ext_err}"
+
+        try:
+            safe_subdir = _resolve_subdir(subdir)
+        except ValueError as e:
+            return f"Error: {e}. Nothing written."
+
+        root = _dctl_root(canonical_cat)
+        target_dir = root if safe_subdir is None else os.path.join(root, safe_subdir)
+        path = os.path.join(target_dir, f"{name}{chosen_ext}")
+
+        # Existence guard BEFORE creating any directory or file so an
+        # overwrite=False conflict truly writes nothing.
+        if os.path.exists(path) and not overwrite:
+            return (
+                f"Error: DCTL '{name}{chosen_ext}' already exists at {path}. "
+                f"Pass overwrite=True to replace it. Nothing written."
+            )
+
+        os.makedirs(target_dir, exist_ok=True)
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(source)
+        except OSError as e:
+            return f"Error: failed to write DCTL to {path}: {e}"
+
+        if canonical_cat == "lut":
+            next_step = (
+                "Call refresh_luts to make Resolve pick up the new DCTL "
+                "(no restart needed)."
+            )
+        else:
+            next_step = (
+                "ACES DCTLs are scanned only at Resolve startup — RESTART "
+                "DaVinci Resolve before this transform appears (a LUT refresh "
+                "is not enough)."
+            )
+
+        return json.dumps(
+            {
+                "success": True,
+                "path": path,
+                "category": canonical_cat,
+                "ext": chosen_ext,
+                "next_step": next_step,
+            },
+            indent=2,
+            default=str,
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def install_fuse(name: str, source: str, overwrite: bool = False) -> str:
+    """Write a Fusion Fuse (.fuse) source file into Fusion's Fuses directory.
+
+    Filesystem write ONLY — no running Resolve required. The Fuse ``source`` is
+    written verbatim (NO Lua/GLSL compilation is attempted); only a minimal
+    non-empty guard runs. A NEW Fuse is registered by Fusion at STARTUP, so a
+    Resolve RESTART is required before the Fuse becomes usable — the MCP cannot
+    trigger the Inspector reload that edits of an existing Fuse would use.
+
+    Parameters:
+    - name: the Fuse class identifier — must match ``[A-Za-z_][A-Za-z0-9_]*``
+      (the Fuse SDK requirement; a bad name produces comps that will not
+      reopen). An unsafe or empty name is rejected and nothing is written.
+    - source: the full Fuse source (Lua, or Lua+GLSL for a view LUT). An
+      empty/whitespace value is rejected BEFORE any file is created.
+    - overwrite: when False (default) an existing target file is left untouched
+      and an error is returned; pass True to replace it.
+
+    Returns a JSON object ``{success, path, next_step}`` on success, or an
+    ``Error: ...`` string on any failure — writing NOTHING when the name is
+    unsafe, the source is empty, or the target exists and overwrite is False.
+    """
+    try:
+        if not name or not _FUSE_NAME_RE.match(name):
+            return (
+                f"Error: invalid Fuse name '{name}'. Must match "
+                f"[A-Za-z_][A-Za-z0-9_]* (Fuse SDK requirement; bad names "
+                f"produce comps that will not reopen). Nothing written."
+            )
+
+        if not isinstance(source, str) or not source.strip():
+            return (
+                "Error: source is required and must be a non-empty Fuse string. "
+                "Nothing written."
+            )
+
+        fuses_dir = _plugin_install_paths()["fuses_dir"]
+        path = os.path.join(fuses_dir, f"{name}.fuse")
+
+        # Existence guard BEFORE creating any directory or file so an
+        # overwrite=False conflict truly writes nothing.
+        if os.path.exists(path) and not overwrite:
+            return (
+                f"Error: Fuse '{name}' already exists at {path}. Pass "
+                f"overwrite=True to replace it. Nothing written."
+            )
+
+        os.makedirs(fuses_dir, exist_ok=True)
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(source)
+        except OSError as e:
+            return f"Error: failed to write Fuse to {path}: {e}"
+
+        return json.dumps(
+            {
+                "success": True,
+                "path": path,
+                "next_step": (
+                    "RESTART DaVinci Resolve to register the new Fuse — Fusion "
+                    "scans the Fuses directory only at startup."
+                ),
             },
             indent=2,
             default=str,

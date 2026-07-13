@@ -1090,3 +1090,179 @@ def get_timeline_node_graph() -> str:
         return json.dumps(node_graph_to_dict(graph), indent=2, default=str)
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
+
+
+# ── Gallery still / PowerGrade albums ────────────────────────────────────
+#
+# This repo has no object-id registry, so GalleryStillAlbum objects are
+# addressed BY NAME: enumerate gallery.GetGalleryStillAlbums() /
+# gallery.GetGalleryPowerGradeAlbums() and match gallery.GetAlbumName(album).
+
+_ALBUM_TYPES = ("still", "powergrade")
+
+
+def _gallery_albums(gallery, album_type: str):
+    """Return the album list for ``album_type`` ("still" or "powergrade").
+
+    Returns a (possibly empty) list of GalleryStillAlbum handles; the two
+    calls are distinct so still albums and PowerGrade albums never mix.
+    """
+    if album_type == "powergrade":
+        albums = gallery.GetGalleryPowerGradeAlbums()
+    else:
+        albums = gallery.GetGalleryStillAlbums()
+    return list(albums) if albums else []
+
+
+def _find_album_by_name(gallery, albums, name: str):
+    """Return the album in ``albums`` whose ``GetAlbumName`` is ``name``.
+
+    Returns ``None`` when no album matches so callers can emit a clear
+    "album not found" message without touching rename/set APIs.
+    """
+    for album in albums:
+        if gallery.GetAlbumName(album) == name:
+            return album
+    return None
+
+
+@mcp.tool()
+def list_gallery_albums(album_type: str = "still") -> str:
+    """List the names of gallery still or PowerGrade albums, as a JSON array.
+
+    Still albums and PowerGrade albums are two distinct sets in the gallery;
+    this returns whichever set ``album_type`` selects. Returns an empty array
+    when that set has no albums.
+
+    Parameters:
+    - album_type: "still" or "powergrade" (case-insensitive, default "still").
+    """
+    try:
+        canonical, err = _check_choice(album_type, _ALBUM_TYPES, "album_type")
+        if err:
+            return err
+        gallery = _conn().get_gallery()
+        albums = _gallery_albums(gallery, canonical)
+        names = [gallery.GetAlbumName(a) for a in albums]
+        return json.dumps(names, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def create_gallery_album(album_type: str = "still") -> str:
+    """Create a new gallery still or PowerGrade album in the current project.
+
+    Parameters:
+    - album_type: "still" or "powergrade" (case-insensitive, default "still").
+    """
+    try:
+        canonical, err = _check_choice(album_type, _ALBUM_TYPES, "album_type")
+        if err:
+            return err
+        gallery = _conn().get_gallery()
+        if canonical == "powergrade":
+            album = gallery.CreateGalleryPowerGradeAlbum()
+        else:
+            album = gallery.CreateGalleryStillAlbum()
+        name = gallery.GetAlbumName(album) if album is not None else None
+        return _ok(
+            album is not None,
+            f"Created {canonical} album"
+            + (f" '{name}'." if name else "."),
+            f"Failed to create {canonical} album.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_current_still_album() -> str:
+    """Get the name of the gallery's currently selected still album.
+
+    Returns the album name, or a clear message when no still album is
+    currently selected.
+    """
+    try:
+        gallery = _conn().get_gallery()
+        album = gallery.GetCurrentStillAlbum()
+        if album is None:
+            return "No still album is currently selected."
+        name = gallery.GetAlbumName(album)
+        return name if name else "(current still album has no name)"
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_current_still_album(album_name: str) -> str:
+    """Set the gallery's current still album by name.
+
+    Locates the still album named ``album_name`` (only still albums can be
+    the current still album) and makes it active. Returns a clear
+    "album not found" message listing the available still album names when
+    no album matches — it does not raise.
+
+    Parameters:
+    - album_name: name of the still album to make current.
+    """
+    try:
+        gallery = _conn().get_gallery()
+        albums = _gallery_albums(gallery, "still")
+        album = _find_album_by_name(gallery, albums, album_name)
+        if album is None:
+            available = [gallery.GetAlbumName(a) for a in albums]
+            return (
+                f"Still album '{album_name}' not found. Available still "
+                f"albums: {', '.join(available) if available else '(none)'}."
+            )
+        result = gallery.SetCurrentStillAlbum(album)
+        return _ok(
+            result,
+            f"Current still album set to '{album_name}'.",
+            f"Failed to set current still album to '{album_name}'.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def rename_gallery_album(
+    album_name: str,
+    new_name: str,
+    album_type: str = "still",
+) -> str:
+    """Rename a gallery still or PowerGrade album.
+
+    Locates the album named ``album_name`` within the selected album set and
+    renames it to ``new_name`` via ``Gallery.SetAlbumName``. Returns a clear
+    "album not found" message listing the available names when no album
+    matches — it does not raise.
+
+    Parameters:
+    - album_name: current name of the album to rename.
+    - new_name: new name for the album.
+    - album_type: "still" or "powergrade" (case-insensitive, default "still").
+    """
+    try:
+        canonical, err = _check_choice(album_type, _ALBUM_TYPES, "album_type")
+        if err:
+            return err
+        gallery = _conn().get_gallery()
+        albums = _gallery_albums(gallery, canonical)
+        album = _find_album_by_name(gallery, albums, album_name)
+        if album is None:
+            available = [gallery.GetAlbumName(a) for a in albums]
+            return (
+                f"{canonical.capitalize()} album '{album_name}' not found. "
+                f"Available {canonical} albums: "
+                f"{', '.join(available) if available else '(none)'}."
+            )
+        result = gallery.SetAlbumName(album, new_name)
+        return _ok(
+            result,
+            f"Renamed {canonical} album '{album_name}' to '{new_name}'.",
+            f"Failed to rename {canonical} album '{album_name}'.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
