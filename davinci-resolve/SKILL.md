@@ -31,12 +31,18 @@ Resolve, plus **18 offline** tools that read/write Resolve's own files (`.drp`/`
 and a local SQLite store with no Resolve running — plus 3 `resolve://` resources and an
 `editing_strategy` prompt.
 
-**Two references, loaded on demand (don't inline them):**
+**Three references, loaded on demand (don't inline them):**
 - [`reference/setup.md`](./reference/setup.md) — the full, gated MCP install/registration
   runbook. Open it when onboarding.
 - [`reference/tool-catalog.md`](./reference/tool-catalog.md) — the exact 324-tool list
   (live + offline) with one-line descriptions, grouped by module. Open it when you need a
   precise tool name/param.
+- [`reference/operating-notes.md`](./reference/operating-notes.md) — real-world gotchas for
+  the newer / less-obvious surface (Neural-Engine-extras that return `False` not an error,
+  gallery stills needing the panel visible, color-managed-only input color space, the
+  no-transition-object hybrid, the `ofx.` prefix + `MediaOut1` splice, BezierSpline-first
+  keyframing, read-only node graphs, Studio-18.5-gated cloud projects, `quit_resolve`
+  terminating the app). Open it before driving those tools.
 
 ---
 
@@ -71,6 +77,16 @@ project is open? List the clips on video track 1."*), then continue with operati
 
 **Every tool returns a plain string; failures come back as `"Error: ..."` strings, never
 exceptions.** Read the returned string and react — never assume success.
+
+**Before driving the newer / less-obvious surface, skim
+[`reference/operating-notes.md`](./reference/operating-notes.md).** It captures the gotchas
+that look like bugs but aren't: Neural-Engine extras that return `False` (not an error),
+gallery stills needing the Gallery panel visible, `set_input_color_space` requiring a
+color-managed project, the API's **no transition object** (offline `.drt`/`.drp` writes are
+`"verified": false`, or use the Cmd+T keystroke hybrid), `apply_ofx_to_clip` keeping the
+`ofx.` prefix and splicing before `MediaOut1`, keyframing a virgin Fusion input needing a
+`BezierSpline` first, read-only color node graphs, Studio-18.5-gated cloud projects, and
+`quit_resolve` terminating the app.
 
 ### Preconditions
 1. `davinci-resolve` MCP configured (else run onboarding).
