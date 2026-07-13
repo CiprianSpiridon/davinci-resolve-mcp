@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 
 from ..app import mcp
-from ..helpers import _conn, _ok
+from ..helpers import _check_choice, _conn, _ok, _require_timeline
 from ..resolve_utils import folder_to_dict
 
 
@@ -517,5 +517,233 @@ def append_to_timeline(clip_names: list[str]) -> str:
                     continue
             output["timeline_items"] = names
         return json.dumps(output, indent=2)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Audio sync, stereoscopic 3D & UI selection ────────────────────────────
+
+
+# Resolve exposes the AutoSyncAudio settings keys/values as string constants
+# on the top-level Resolve object (e.g. ``resolve.AUDIO_SYNC_MODE``,
+# ``resolve.AUDIO_SYNC_TIMECODE``). We look them up via ``getattr`` so the
+# real constant is used when available, falling back to the literal name on
+# older Resolve versions that don't expose it.
+_AUDIO_SYNC_MODE_CONSTS = {
+    "waveform": "AUDIO_SYNC_WAVEFORM",
+    "timecode": "AUDIO_SYNC_TIMECODE",
+}
+
+
+@mcp.tool()
+def auto_sync_audio(
+    clip_names: list[str],
+    mode: str = "timecode",
+    channel_number: int | None = None,
+    retain_embedded_audio: bool = False,
+    retain_video_metadata: bool = False,
+) -> str:
+    """Auto-sync audio across Media Pool clips (needs a video + audio pair), as JSON.
+
+    Resolves every name against the Media Pool's current folder
+    (``MediaPool.GetCurrentFolder()``) and calls
+    ``MediaPool.AutoSyncAudio(clips, audioSyncSettings)``. At least two clips
+    must resolve — typically one video clip and one audio clip.
+
+    Parameters:
+    - clip_names: names of at least two clips (video + audio) to sync. Names
+      that don't resolve are reported back under ``not_found`` rather than
+      raising.
+    - mode: sync mode, one of "waveform" or "timecode" (default: "timecode").
+    - channel_number: optional audio channel offset for waveform mode
+      (-1 = automatic, -2 = mix, or a 1-based channel number).
+    - retain_embedded_audio: keep the video clip's embedded audio
+      (default: False).
+    - retain_video_metadata: keep the video clip's metadata (default: False).
+    """
+    try:
+        if not clip_names:
+            return "Error: clip_names must be a non-empty list."
+
+        mode, err = _check_choice(mode, ("waveform", "timecode"), "audio sync mode")
+        if err:
+            return f"Error: {err}"
+
+        mp = _media_pool()
+        folder = _current_folder()
+        clips, not_found = _resolve_clips_by_name(folder, clip_names)
+
+        if len(clips) < 2:
+            return json.dumps(
+                {
+                    "success": False,
+                    "message": (
+                        "Audio sync needs at least 2 clips (at least one video "
+                        "and one audio clip)."
+                    ),
+                    "resolved": len(clips),
+                    "not_found": not_found,
+                },
+                indent=2,
+            )
+
+        resolve = _conn().get_resolve()
+        settings: dict = {}
+        mode_key = getattr(resolve, "AUDIO_SYNC_MODE", "AUDIO_SYNC_MODE")
+        mode_val_name = _AUDIO_SYNC_MODE_CONSTS[mode]
+        settings[mode_key] = getattr(resolve, mode_val_name, mode_val_name)
+        if channel_number is not None:
+            ch_key = getattr(
+                resolve, "AUDIO_SYNC_CHANNEL_NUMBER", "AUDIO_SYNC_CHANNEL_NUMBER"
+            )
+            settings[ch_key] = channel_number
+        if retain_embedded_audio:
+            settings[
+                getattr(
+                    resolve,
+                    "AUDIO_SYNC_RETAIN_EMBEDDED_AUDIO",
+                    "AUDIO_SYNC_RETAIN_EMBEDDED_AUDIO",
+                )
+            ] = True
+        if retain_video_metadata:
+            settings[
+                getattr(
+                    resolve,
+                    "AUDIO_SYNC_RETAIN_VIDEO_METADATA",
+                    "AUDIO_SYNC_RETAIN_VIDEO_METADATA",
+                )
+            ] = True
+
+        result = mp.AutoSyncAudio(clips, settings)
+        output = {"success": bool(result), "mode": mode, "synced_clips": len(clips)}
+        if not_found:
+            output["not_found"] = not_found
+        return json.dumps(output, indent=2)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def create_stereo_clip(left_clip_name: str, right_clip_name: str) -> str:
+    """Create a stereoscopic 3D clip from a left- and right-eye clip, as JSON.
+
+    Both clips are resolved against the Media Pool's current folder and passed
+    to ``MediaPool.CreateStereoClip(left, right)``. The resulting stereo clip
+    replaces the input clips in the Media Pool.
+
+    Parameters:
+    - left_clip_name: name of the left-eye clip (in the current folder).
+    - right_clip_name: name of the right-eye clip (in the current folder).
+    """
+    try:
+        if not left_clip_name or not left_clip_name.strip():
+            return "Error: left_clip_name must be a non-empty string."
+        if not right_clip_name or not right_clip_name.strip():
+            return "Error: right_clip_name must be a non-empty string."
+
+        mp = _media_pool()
+        folder = _current_folder()
+        clips, not_found = _resolve_clips_by_name(
+            folder, [left_clip_name, right_clip_name]
+        )
+        if not_found:
+            return json.dumps(
+                {
+                    "success": False,
+                    "not_found": not_found,
+                    "message": "Could not resolve both clips in the current Media Pool folder.",
+                },
+                indent=2,
+            )
+
+        stereo = mp.CreateStereoClip(clips[0], clips[1])
+        if stereo is None:
+            return "Error: Failed to create stereo clip."
+        try:
+            name = stereo.GetName()
+        except Exception:  # noqa: BLE001
+            name = "(unnamed)"
+        return json.dumps({"success": True, "stereo_clip": name}, indent=2)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def convert_timeline_to_stereo(num_frames: int) -> str:
+    """Convert the current timeline to stereoscopic 3D.
+
+    Calls ``Timeline.ConvertTimelineToStereo(num_frames)`` on the current
+    timeline.
+
+    Parameters:
+    - num_frames: number of frames in the timeline to convert.
+    """
+    try:
+        conn = _conn()
+        timeline = _require_timeline(conn)
+        result = timeline.ConvertTimelineToStereo(num_frames)
+        return _ok(
+            result,
+            f"Converted the current timeline to stereoscopic 3D ({num_frames} frames).",
+            "Error: Failed to convert the timeline to stereoscopic 3D.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_selected_clips() -> str:
+    """Get the names of the clips currently selected in the Media Pool UI, as a JSON list.
+
+    Calls ``MediaPool.GetSelectedClips()`` and returns the selected clips'
+    names as a JSON array (empty when nothing is selected).
+    """
+    try:
+        mp = _media_pool()
+        clips = mp.GetSelectedClips()
+        names = []
+        for clip in clips or []:
+            try:
+                names.append(clip.GetName())
+            except Exception:  # noqa: BLE001
+                continue
+        return json.dumps(names, indent=2)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_selected_clip(clip_name: str) -> str:
+    """Select a single clip in the Media Pool UI, by name.
+
+    Resolves ``clip_name`` against the Media Pool's current folder and calls
+    ``MediaPool.SetSelectedClip(clip)``.
+
+    Parameters:
+    - clip_name: name of the clip (in the current folder) to select. If it
+      doesn't resolve, it's reported back under ``not_found`` rather than
+      raising.
+    """
+    try:
+        if not clip_name or not clip_name.strip():
+            return "Error: clip_name must be a non-empty string."
+        mp = _media_pool()
+        folder = _current_folder()
+        clips, not_found = _resolve_clips_by_name(folder, [clip_name])
+        if not clips:
+            return json.dumps(
+                {
+                    "success": False,
+                    "not_found": not_found,
+                    "message": f"Clip '{clip_name}' not found in the current Media Pool folder.",
+                },
+                indent=2,
+            )
+        result = mp.SetSelectedClip(clips[0])
+        return _ok(
+            result,
+            f"Selected clip '{clip_name}'.",
+            f"Error: Failed to select clip '{clip_name}'.",
+        )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"

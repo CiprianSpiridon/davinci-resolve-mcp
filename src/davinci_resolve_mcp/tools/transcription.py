@@ -14,6 +14,17 @@ tools:
   either whisper backend, so it always works even with no backend
   installed.
 
+In addition to the four local-Whisper tools above, this module owns two
+*native* tools — ``transcribe_clip_audio`` and ``clear_clip_transcription``
+— that invoke Resolve's own Neural-Engine transcription on a
+``MediaPoolItem`` (``MediaPoolItem.TranscribeAudio`` /
+``MediaPoolItem.ClearTranscription``). These are distinct from the local
+Whisper backend: they run inside Resolve and require Resolve Studio plus the
+transcription language pack (a "Studio + Extras" feature). ``TranscribeAudio``
+returns ``False`` on the free edition or when the language model package is
+missing; the tool surfaces that as a clear precondition failure rather than
+raising.
+
 Per the ownership contract, this module owns every transcription-related
 tool in this server. Neither this module nor
 ``davinci_resolve_mcp.transcription_engine`` imports ``mlx_whisper`` /
@@ -31,7 +42,8 @@ import os
 from typing import Optional
 
 from ..app import mcp
-from ..helpers import _conn, _require_timeline
+from ..helpers import _conn, _ok, _require_timeline
+from ..tools.media_pool_item import _find_clip
 from ..transcription_engine import (
     DEFAULT_MODEL,
     WHISPER_MODELS,
@@ -283,3 +295,88 @@ def list_whisper_models() -> str:
             "by this listing."
         ),
     }, indent=2)
+
+
+# ── Native Resolve (Neural-Engine) transcription ─────────────────────────────
+#
+# These wrap MediaPoolItem.TranscribeAudio / ClearTranscription — Resolve's
+# built-in transcription, which runs inside Resolve (not the local Whisper
+# backend above). They require Resolve Studio plus the transcription language
+# pack (Studio + Extras). The clip is resolved by name in the media pool's
+# current folder via _find_clip (shared with the media_pool_item tools).
+
+_STUDIO_HINT = (
+    "This requires DaVinci Resolve Studio plus the transcription language "
+    "pack (Studio + Extras): install it via Resolve > DaVinci Resolve > "
+    "Voice / Speech-to-Text language models. Native transcription is not "
+    "available on the free edition or when the language model package is "
+    "missing."
+)
+
+
+@mcp.tool()
+def transcribe_clip_audio(clip_name: str) -> str:
+    """
+    Transcribe a media pool clip's audio using Resolve's own Neural-Engine
+    transcription (MediaPoolItem.TranscribeAudio()). This runs inside DaVinci
+    Resolve — it is distinct from the local Whisper tools above.
+
+    Requires Resolve Studio and the transcription language pack (Studio +
+    Extras). On the free edition, or when the language model package is
+    missing, Resolve returns False and this tool reports the precondition
+    failure rather than success.
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the media pool's current
+      folder. An unknown name returns a clear error listing the clips that
+      are available in that folder.
+    """
+    try:
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "TranscribeAudio"):
+            return (
+                "Error: TranscribeAudio is not available on this clip object. "
+                + _STUDIO_HINT
+            )
+        result = clip.TranscribeAudio()
+        return _ok(
+            result,
+            f"Started native audio transcription for clip '{clip_name}'.",
+            f"Error: Resolve declined to transcribe clip '{clip_name}'. "
+            + _STUDIO_HINT,
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def clear_clip_transcription(clip_name: str) -> str:
+    """
+    Clear the native (Neural-Engine) audio transcription of a media pool clip
+    (MediaPoolItem.ClearTranscription()). Undoes a prior transcribe_clip_audio.
+
+    Requires Resolve Studio and the transcription language pack (Studio +
+    Extras). When Resolve returns False, this tool reports the precondition
+    failure rather than success.
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the media pool's current
+      folder. An unknown name returns a clear error listing the clips that
+      are available in that folder.
+    """
+    try:
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "ClearTranscription"):
+            return (
+                "Error: ClearTranscription is not available on this clip "
+                "object. " + _STUDIO_HINT
+            )
+        result = clip.ClearTranscription()
+        return _ok(
+            result,
+            f"Cleared native audio transcription for clip '{clip_name}'.",
+            f"Error: Resolve declined to clear transcription for clip "
+            f"'{clip_name}'. " + _STUDIO_HINT,
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"

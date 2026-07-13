@@ -335,3 +335,62 @@ def export_render_preset(preset_name: str, export_path: str) -> str:
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
+
+
+# ── Playback transport ──────────────────────────────────────────────────
+# ``Play``/``Stop`` live on the top-level ``Resolve`` object and drive the
+# transport of whatever timeline is currently loaded on the Edit/Color page.
+
+@mcp.tool()
+def play_timeline() -> str:
+    """Start playback of the current timeline in DaVinci Resolve."""
+    try:
+        resolve = _conn().get_resolve()
+        if not hasattr(resolve, "Play"):
+            return "Error: Play is not available on this Resolve object."
+        # Resolve.Play() returns None (void), so treat a call that doesn't
+        # raise as success — mirrors the example's resolve_api.play(), which
+        # returns True after calling self.resolve.Play().
+        resolve.Play()
+        return _ok(True, "Playback started", "Failed to start playback")
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def stop_timeline() -> str:
+    """Stop playback of the current timeline in DaVinci Resolve."""
+    try:
+        resolve = _conn().get_resolve()
+        if not hasattr(resolve, "Stop"):
+            return "Error: Stop is not available on this Resolve object."
+        # Resolve.Stop() returns None (void), so treat a call that doesn't
+        # raise as success — mirrors the example's resolve_api.stop(), which
+        # returns True after calling self.resolve.Stop().
+        resolve.Stop()
+        return _ok(True, "Playback stopped", "Failed to stop playback")
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Application quit ─────────────────────────────────────────────────────
+
+@mcp.tool()
+def quit_resolve() -> str:
+    """Terminate the DaVinci Resolve application.
+
+    WARNING: This QUITS the running DaVinci Resolve app entirely. It is
+    IRREVERSIBLE for the current session — Resolve shuts down, this MCP
+    server loses its connection, and every subsequent tool call will fail
+    until DaVinci Resolve is manually relaunched. Any unsaved project
+    changes may be lost. Use only when you explicitly intend to close the
+    application.
+    """
+    try:
+        resolve = _conn().get_resolve()
+        if not hasattr(resolve, "Quit"):
+            return "Error: Quit is not available on this Resolve object."
+        resolve.Quit()
+        return _ok(True, "DaVinci Resolve application terminated", "Failed to quit DaVinci Resolve")
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"

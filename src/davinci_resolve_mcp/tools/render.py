@@ -352,3 +352,167 @@ def is_rendering() -> str:
         return json.dumps({"is_rendering": bool(in_progress)})
     except Exception as e:
         return f"Error: {e}"
+
+
+# ── Quick Export ──────────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def get_quick_export_presets() -> str:
+    """List the available Quick Export render preset names.
+
+    These are the presets surfaced in Resolve's File > Quick Export dialog
+    (e.g. "H.264 Master", "H.265 Master", "YouTube", "Vimeo", "TikTok").
+    """
+    try:
+        project = _project()
+        presets = project.GetQuickExportRenderPresets()
+        return json.dumps(
+            {"quick_export_presets": safe_serialize(presets) if presets else []}, indent=2
+        )
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def quick_export(preset_name: str, target_dir: str = "", custom_name: str = "") -> str:
+    """Render the current timeline using a Quick Export preset.
+
+    Parameters:
+    - preset_name: Quick Export preset name (see ``get_quick_export_presets``).
+      Common values: "H.264 Master", "H.265 Master", "YouTube", "Vimeo", "TikTok".
+    - target_dir: Output directory. If empty, the project default is used.
+    - custom_name: Output filename. If empty, the timeline name is used.
+    """
+    try:
+        project = _project()
+        params: Dict[str, Any] = {}
+        if target_dir:
+            params["TargetDir"] = target_dir
+        if custom_name:
+            params["CustomName"] = custom_name
+
+        result = project.RenderWithQuickExport(preset_name, params)
+        if result:
+            return json.dumps(
+                {
+                    "status": "rendering",
+                    "preset": preset_name,
+                    "result": safe_serialize(result),
+                },
+                indent=2,
+            )
+        return (
+            f"Failed to start Quick Export with preset '{preset_name}'. "
+            "Check get_quick_export_presets() for valid names."
+        )
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ── Data burn-in presets ──────────────────────────────────────────────────
+
+
+@mcp.tool()
+def import_burn_in_preset(preset_path: str) -> str:
+    """Import a data burn-in preset from a file.
+
+    Parameters:
+    - preset_path: File path to the burn-in preset to import.
+
+    Note: this operates on the Resolve application object (not the Project).
+    """
+    try:
+        resolve = _conn().get_resolve()
+        success = resolve.ImportBurnInPreset(preset_path)
+        return _ok(
+            success,
+            f"Burn-in preset imported from '{preset_path}'",
+            f"Failed to import burn-in preset from '{preset_path}'.",
+        )
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def export_burn_in_preset(preset_name: str, export_path: str) -> str:
+    """Export a data burn-in preset to a file.
+
+    Parameters:
+    - preset_name: Name of the burn-in preset to export.
+    - export_path: File path to write the exported preset to.
+
+    Note: this operates on the Resolve application object (not the Project).
+    """
+    try:
+        resolve = _conn().get_resolve()
+        success = resolve.ExportBurnInPreset(preset_name, export_path)
+        return _ok(
+            success,
+            f"Burn-in preset '{preset_name}' exported to '{export_path}'",
+            f"Failed to export burn-in preset '{preset_name}'.",
+        )
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def load_burn_in_preset(preset_name: str) -> str:
+    """Load a data burn-in preset for the current project.
+
+    Parameters:
+    - preset_name: Name of the burn-in preset to load.
+    """
+    try:
+        project = _project()
+        success = project.LoadBurnInPreset(preset_name)
+        return _ok(
+            success,
+            f"Burn-in preset '{preset_name}' loaded",
+            f"Failed to load burn-in preset '{preset_name}'.",
+        )
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ── Render-preset save / delete ───────────────────────────────────────────
+
+
+@mcp.tool()
+def save_render_preset(preset_name: str) -> str:
+    """Save the current render settings as a new render preset.
+
+    Parameters:
+    - preset_name: Unique name for the new render preset.
+    """
+    try:
+        project = _project()
+        success = project.SaveAsNewRenderPreset(preset_name)
+        return _ok(
+            success,
+            f"Render preset '{preset_name}' saved",
+            f"Failed to save render preset. Name '{preset_name}' may already exist.",
+        )
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def delete_render_preset(preset_name: str) -> str:
+    """Delete a render preset by name.
+
+    Parameters:
+    - preset_name: Name of the render preset to delete (see
+      ``get_render_preset_list``).
+    """
+    try:
+        project = _project()
+        success = project.DeleteRenderPreset(preset_name)
+        return _ok(
+            success,
+            f"Render preset '{preset_name}' deleted",
+            f"Failed to delete render preset '{preset_name}'. "
+            "Check get_render_preset_list() for valid names.",
+        )
+    except Exception as e:
+        return f"Error: {e}"

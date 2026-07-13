@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 
 from ..app import mcp
-from ..helpers import _conn, _get_timeline_item, _ok
+from ..helpers import _check_choice, _conn, _get_timeline_item, _ok
 from ..resolve_utils import node_graph_to_dict
 
 _NO_GRAPH_MSG = (
@@ -33,6 +33,15 @@ _NO_GRAPH_MSG = (
 )
 
 _VERSION_TYPES = {0: "local", 1: "remote"}
+
+# Human-readable export_type -> the constant name Resolve exposes on the
+# top-level Resolve object (TimelineItem.ExportLUT expects that constant).
+_EXPORT_LUT_TYPES = {
+    "17ptcube": "EXPORT_LUT_17PTCUBE",
+    "33ptcube": "EXPORT_LUT_33PTCUBE",
+    "65ptcube": "EXPORT_LUT_65PTCUBE",
+    "panasonicvlut": "EXPORT_LUT_PANASONICVLUT",
+}
 
 
 def _get_graph(track_type: str, track_index: int, item_index: int):
@@ -493,6 +502,195 @@ def grab_all_stills(still_frame_source: int = 1) -> str:
             f"Grabbed {count} still(s) into the gallery.",
             "Failed to grab stills. Make sure the Color page is active "
             "and the timeline has clips.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Grade transfer / LUT export / version rename ─────────────────────────
+
+
+@mcp.tool()
+def copy_grades(
+    targets: str,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Copy a source clip's current grade onto one or more target clips.
+
+    Locates the source clip via (track_type, track_index, item_index) and
+    applies its grade to every clip named in ``targets`` using
+    ``TimelineItem.CopyGrades``.
+
+    Parameters:
+    - targets: a JSON array of clip locators, each an object with keys
+      "track_type" (default "video"), "track_index" (default 1), and
+      "item_index" (default 0). Example:
+      '[{"track_type": "video", "track_index": 1, "item_index": 1}]'.
+    - track_type: source clip track type — "video", "audio", or "subtitle"
+      (default "video").
+    - track_index: source clip 1-based track index (default 1).
+    - item_index: source clip 0-based item index within that track
+      (default 0).
+    """
+    try:
+        try:
+            parsed = json.loads(targets)
+        except (ValueError, TypeError) as e:
+            return (
+                f"Invalid targets JSON: {e}. Provide a JSON array of clip "
+                'locators, e.g. [{"track_type": "video", "track_index": 1, '
+                '"item_index": 1}].'
+            )
+        if not isinstance(parsed, list) or not parsed:
+            return (
+                "targets must be a non-empty JSON array of clip locators, "
+                'e.g. [{"track_type": "video", "track_index": 1, '
+                '"item_index": 1}].'
+            )
+
+        source = _get_timeline_item(track_type, track_index, item_index)
+
+        target_items = []
+        for i, entry in enumerate(parsed):
+            if not isinstance(entry, dict):
+                return (
+                    f"targets[{i}] must be an object with keys track_type, "
+                    "track_index, item_index."
+                )
+            try:
+                target_items.append(
+                    _get_timeline_item(
+                        entry.get("track_type", "video"),
+                        int(entry.get("track_index", 1)),
+                        int(entry.get("item_index", 0)),
+                    )
+                )
+            except (ValueError, TypeError) as e:
+                return f"targets[{i}] has invalid index values: {e}."
+            except Exception as e:  # noqa: BLE001
+                return f"targets[{i}] could not be located: {e}"
+
+        result = source.CopyGrades(target_items)
+        return _ok(
+            result,
+            f"Copied grade to {len(target_items)} target clip(s).",
+            "Failed to copy grade. Make sure the Color page is active and "
+            "the source clip has a grade to copy.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def export_lut(
+    export_type: str,
+    path: str,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Export a clip's current grade as a LUT file.
+
+    Parameters:
+    - export_type: LUT format — one of "17ptcube", "33ptcube", "65ptcube",
+      or "panasonicvlut" (case-insensitive).
+    - path: output file path (an appropriate extension is appended if
+      missing).
+    - track_type: "video", "audio", or "subtitle" (default "video").
+    - track_index: 1-based track index (default 1).
+    - item_index: 0-based item index within that track (default 0).
+    """
+    try:
+        canonical, err = _check_choice(
+            export_type, tuple(_EXPORT_LUT_TYPES.keys()), "export_type"
+        )
+        if err:
+            return err
+
+        item = _get_timeline_item(track_type, track_index, item_index)
+
+        attr = _EXPORT_LUT_TYPES[canonical]
+        etype = getattr(_conn().get_resolve(), attr, None)
+        if etype is None:
+            return (
+                f"LUT export type '{canonical}' ({attr}) is not available in "
+                "this Resolve version."
+            )
+
+        result = item.ExportLUT(etype, path)
+        return _ok(
+            result,
+            f"Exported {canonical} LUT to '{path}'.",
+            f"Failed to export LUT to '{path}'. Check that the path is "
+            "writable and the clip has a grade.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def rename_color_version(
+    old_name: str,
+    new_name: str,
+    version_type: int = 0,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Rename a clip's color version from ``old_name`` to ``new_name``.
+
+    Parameters:
+    - old_name: current name of the version to rename.
+    - new_name: new name for the version.
+    - version_type: 0 = local, 1 = remote (default 0).
+    - track_type: "video", "audio", or "subtitle" (default "video").
+    - track_index: 1-based track index (default 1).
+    - item_index: 0-based item index within that track (default 0).
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        result = item.RenameVersionByName(old_name, new_name, version_type)
+        kind = _VERSION_TYPES.get(version_type, str(version_type))
+        return _ok(
+            result,
+            f"Renamed {kind} color version '{old_name}' to '{new_name}'.",
+            f"Failed to rename color version '{old_name}'. Check that it "
+            f"exists for the given version_type and '{new_name}' is unused.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def reset_node_colors(
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Reset the node color (label color) on every node of the active version.
+
+    Requires DaVinci Resolve 20.2+; returns a clear message on older
+    versions where ``TimelineItem.ResetAllNodeColors`` is not available.
+
+    Parameters:
+    - track_type: "video", "audio", or "subtitle" (default "video").
+    - track_index: 1-based track index (default 1).
+    - item_index: 0-based item index within that track (default 0).
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        if not hasattr(item, "ResetAllNodeColors"):
+            return (
+                "ResetAllNodeColors is not available in this Resolve "
+                "version (needs 20.2+)."
+            )
+        result = item.ResetAllNodeColors()
+        return _ok(
+            result,
+            "Reset node colors on all nodes of the active version.",
+            "Failed to reset node colors.",
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"

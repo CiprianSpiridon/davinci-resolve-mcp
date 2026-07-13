@@ -32,6 +32,10 @@ Covers:
   ``finalize_take`` / ``delete_take`` (``TimelineItem.GetTakesCount`` /
   ``GetSelectedTakeIndex`` / ``AddTake`` / ``SelectTakeByIndex`` /
   ``FinalizeTake`` / ``DeleteTakeByIndex``).
+- Linkage & audio routing (read-only): ``get_linked_items`` /
+  ``get_track_type_and_index`` / ``get_source_audio_channel_mapping``
+  (``TimelineItem.GetLinkedItems`` / ``GetTrackTypeAndIndex`` /
+  ``GetSourceAudioChannelMapping``).
 
 Per the ownership contract, ``get_timeline_item_properties`` and
 ``set_timeline_item_property`` are defined here and nowhere else in this
@@ -59,7 +63,7 @@ from ..helpers import (
     _get_timeline_item,
     _ok,
 )
-from ..resolve_utils import timeline_item_to_dict_full
+from ..resolve_utils import timeline_item_to_dict, timeline_item_to_dict_full
 
 
 def _find_media_pool_clip(clip_name: str):
@@ -558,5 +562,100 @@ def delete_take(
             f"Error: Failed to delete take {take_index}. Check the take "
             "index is valid (1-based; see get_take_count).",
         )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Linkage & audio routing (read-only) ──────────────────────────────────
+# Introspection into how a timeline item relates to its siblings: which other
+# items are linked to it (e.g. the audio companions of a video clip), which
+# track type/index it lives on, and how its source audio channels are routed.
+
+
+@mcp.tool()
+def get_linked_items(
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Get the timeline items linked to a timeline item (e.g. its audio companions), as a JSON list.
+
+    Returns a JSON array of summarized linked items (name, position, offsets,
+    clip color, enabled state). Returns an empty JSON list ("[]") when the
+    item has no linked items.
+
+    Parameters:
+    - track_type: one of "video", "audio", "subtitle". Defaults to "video".
+    - track_index: 1-based track index.
+    - item_index: 0-based index of the item within that track's item list.
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        linked = item.GetLinkedItems()
+        if not linked:
+            return json.dumps([])
+        return json.dumps(
+            [timeline_item_to_dict(li) for li in linked], indent=2, default=str
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_track_type_and_index(
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Get the track type and 1-based track index a timeline item lives on, as JSON.
+
+    Reports what Resolve itself considers the item's placement (returned by
+    ``TimelineItem.GetTrackTypeAndIndex`` as ``[trackType, trackIndex]``),
+    which may differ from the locator you passed if the item was resolved
+    across linked media.
+
+    Parameters:
+    - track_type: one of "video", "audio", "subtitle". Defaults to "video".
+    - track_index: 1-based track index.
+    - item_index: 0-based index of the item within that track's item list.
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        info = item.GetTrackTypeAndIndex()
+        if not info:
+            return "Error: Track type and index are not available on this timeline item."
+        return json.dumps(
+            {"track_type": info[0], "track_index": info[1]}, default=str
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def get_source_audio_channel_mapping(
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Get the source audio channel mapping of a timeline item, as JSON.
+
+    Returns the routing Resolve exposes via
+    ``TimelineItem.GetSourceAudioChannelMapping`` (which channels of the
+    source media feed which output channels). The API returns a JSON string;
+    it is parsed and re-serialized as pretty JSON. If the value is not valid
+    JSON, the raw string is returned unchanged.
+
+    Parameters:
+    - track_type: one of "video", "audio", "subtitle". Defaults to "video".
+    - track_index: 1-based track index.
+    - item_index: 0-based index of the item within that track's item list.
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        mapping = item.GetSourceAudioChannelMapping()
+        try:
+            return json.dumps(json.loads(mapping), indent=2, default=str)
+        except (json.JSONDecodeError, TypeError):
+            return mapping if mapping else "No source audio channel mapping is available."
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"

@@ -8,6 +8,11 @@ compositions attached to a ``TimelineItem`` (``TimelineItem.GetFusionCompCount``
 ``RenameFusionCompByName``) — plus ``create_fusion_clip``
 (``Timeline.CreateFusionClip``).
 
+This module also hosts the live Fusion *node engine* — adding, wiring, and
+reading tools (nodes) inside a comp attached to a timeline item — plus two
+module-level accessors (:func:`_get_fusion_comp` and :func:`_resolve_tool`)
+that sibling modules (``tools/keyframes.py``, ``tools/fx_plugins.py``) reuse.
+
 Per the ownership contract, ``insert_fusion_generator`` and
 ``insert_fusion_title`` (playhead-insert operations) live in
 ``tools/timeline_edit.py``, not here.
@@ -20,10 +25,10 @@ All tools reach Resolve lazily via ``_conn()``/``_require_timeline()``/
 from __future__ import annotations
 
 import json
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from ..app import mcp
-from ..helpers import _conn, _get_timeline_item, _ok, _require_timeline
+from ..helpers import _coerce_value, _conn, _get_timeline_item, _ok, _require_timeline
 
 
 @mcp.tool()
@@ -232,5 +237,415 @@ def create_fusion_clip(
 
         result = timeline.CreateFusionClip(items)
         return _ok(result, f"Fusion clip created from {len(items)} item(s)", "Failed to create Fusion clip")
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# ── Node-engine accessors (reused by tools/keyframes.py, tools/fx_plugins.py) ──
+#
+# These are plain module-level functions (NOT @mcp.tool()) so sibling modules
+# can import them. They locate the working comp and a named tool inside it,
+# raising a RuntimeError with an actionable message on failure so callers can
+# turn it into a clean "Error: ..." string instead of leaking a traceback.
+
+
+def _get_fusion_comp(item, comp_index: int = 1, create: bool = True):
+    """Return the Fusion composition at ``comp_index`` on a ``TimelineItem``.
+
+    Wraps ``TimelineItem.GetFusionCompByIndex``; when no comp exists at that
+    index and ``create`` is True, falls back to ``TimelineItem.AddFusionComp``.
+
+    Parameters:
+    - item: a live ``TimelineItem`` object.
+    - comp_index: 1-based Fusion composition index on the item (default: 1).
+    - create: create a new comp via ``AddFusionComp`` when none is found.
+
+    Raises ``RuntimeError`` when no comp can be obtained (including when
+    ``AddFusionComp`` returns ``None``), so the caller surfaces a failure
+    string rather than raising out of the tool.
+    """
+    comp = None
+    try:
+        comp = item.GetFusionCompByIndex(comp_index)
+    except Exception:
+        comp = None
+    if comp is None and create:
+        comp = item.AddFusionComp()
+    if comp is None:
+        try:
+            name = item.GetName()
+        except Exception:
+            name = "?"
+        raise RuntimeError(
+            f"No Fusion composition at index {comp_index} on '{name}' "
+            f"(and one could not be created)."
+        )
+    return comp
+
+
+def _resolve_tool(comp, tool_name: str):
+    """Return the named tool (node) in ``comp`` via ``comp.FindTool``.
+
+    Raises ``RuntimeError`` with a clear message when no tool of that name
+    exists, so callers turn it into a failure string (no traceback).
+    """
+    tool = comp.FindTool(tool_name)
+    if tool is None:
+        raise RuntimeError(
+            f"No Fusion tool named '{tool_name}' in the composition. "
+            f"Use fusion_list_inputs / add the tool first."
+        )
+    return tool
+
+
+def _input_object(tool, input_id: str):
+    """Return the FusionInput object whose ``INPS_ID`` matches ``input_id``.
+
+    Falls back to subscript access (``tool[input_id]``) when the input list
+    does not surface a matching id. Returns ``None`` when unavailable.
+    """
+    try:
+        inputs = tool.GetInputList() or {}
+    except Exception:
+        inputs = {}
+    for inp in inputs.values():
+        try:
+            if (inp.GetAttrs() or {}).get("INPS_ID") == input_id:
+                return inp
+        except Exception:
+            continue
+    try:
+        return tool[input_id]
+    except Exception:
+        return None
+
+
+def _ofx_enum_index(inp, label: str) -> Optional[int]:
+    """Best-effort map an OFX enum/combo choice LABEL to its integer index.
+
+    ResolveFX/OFX enum ("choice") inputs are addressed by integer index, not
+    by their display label — so an unmatched label string never sticks. This
+    scans the input's attributes for a list/table of choice labels and returns
+    the 0-based index of a case-insensitive match, or ``None`` if not found.
+    """
+    if inp is None:
+        return None
+    try:
+        attrs = inp.GetAttrs() or {}
+    except Exception:
+        return None
+    target = str(label).strip().lower()
+    for value in attrs.values():
+        items: Optional[list] = None
+        if isinstance(value, (list, tuple)):
+            items = list(value)
+        elif isinstance(value, dict):
+            # Fusion often returns 1-based ordered tables as dicts.
+            try:
+                items = [value[k] for k in sorted(value)]
+            except Exception:
+                items = list(value.values())
+        if not items:
+            continue
+        for idx, choice in enumerate(items):
+            if isinstance(choice, str) and choice.strip().lower() == target:
+                return idx
+    return None
+
+
+def _values_match(a: Any, b: Any) -> bool:
+    """Loose equality for input readback (numeric tolerance; bool-safe)."""
+    try:
+        if isinstance(a, bool) or isinstance(b, bool):
+            return bool(a) == bool(b)
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            return abs(float(a) - float(b)) < 1e-6
+    except Exception:
+        pass
+    return str(a) == str(b)
+
+
+# ── Node-engine tools ─────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def fusion_add_tool(
+    reg_id: str,
+    tool_name: Optional[str] = None,
+    comp_index: int = 1,
+    pos_x: int = -32768,
+    pos_y: int = -32768,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Add a Fusion tool (node) to a timeline item's composition.
+
+    Parameters:
+    - reg_id: the tool registry ID. Native tools use their bare name
+      (e.g. "Merge", "Background", "TextPlus", "Transform", "Blur").
+      ResolveFX/OFX tools KEEP their full "ofx." prefix, e.g.
+      "ofx.com.blackmagicdesign.resolvefx.gaussianblur" — it is passed to
+      ``AddTool`` verbatim, never stripped.
+    - tool_name: optional name to assign the new tool (TOOLS_Name).
+    - comp_index: 1-based Fusion composition index on the item (default: 1).
+    - pos_x / pos_y: flow position; -32768 (default) auto-places the node.
+    - track_type: "video" (default), "audio", or "subtitle".
+    - track_index: 1-based track index (default: 1).
+    - item_index: 0-based index of the item within that track (default: 0).
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        comp = _get_fusion_comp(item, comp_index)
+        tool = comp.AddTool(reg_id, pos_x, pos_y)
+        if tool is None:
+            return (
+                f"Error: AddTool returned None for RegID '{reg_id}'. Check the "
+                f"registry ID (ResolveFX RegIDs keep their 'ofx.' prefix)."
+            )
+        if tool_name:
+            try:
+                tool.SetAttrs({"TOOLS_Name": tool_name})
+            except Exception:
+                pass
+        attrs = tool.GetAttrs() or {}
+        return json.dumps({
+            "success": True,
+            "tool_name": attrs.get("TOOLS_Name", ""),
+            "tool_type": attrs.get("TOOLS_RegID", reg_id),
+            "reg_id": reg_id,
+            "comp_index": comp_index,
+        }, indent=2)
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def fusion_connect_input(
+    tool_name: str,
+    input_name: str,
+    source_tool: str = "",
+    source_output: str = "Output",
+    comp_index: int = 1,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Wire (or unwire) a tool input to another tool's output.
+
+    Parameters:
+    - tool_name: the receiving tool (its input is being connected).
+    - input_name: input ID on the receiving tool (e.g. "Background",
+      "Foreground", "Input", "EffectMask").
+    - source_tool: the source tool whose output feeds the input. Leave EMPTY
+      (default) to DISCONNECT the input instead.
+    - source_output: output ID on the source tool (default: "Output").
+    - comp_index: 1-based Fusion composition index on the item (default: 1).
+    - track_type: "video" (default), "audio", or "subtitle".
+    - track_index: 1-based track index (default: 1).
+    - item_index: 0-based index of the item within that track (default: 0).
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        comp = _get_fusion_comp(item, comp_index)
+        tool = _resolve_tool(comp, tool_name)
+
+        if not source_tool:
+            result = tool.ConnectInput(input_name, None)
+            return _ok(
+                result,
+                f"Disconnected input '{input_name}' on '{tool_name}'.",
+                f"Error: Failed to disconnect input '{input_name}' on '{tool_name}'.",
+            )
+
+        src = _resolve_tool(comp, source_tool)
+        source_obj: Any = src
+        if source_output and source_output != "Output":
+            try:
+                outputs = src.GetOutputList() or {}
+                for out in outputs.values():
+                    if (out.GetAttrs() or {}).get("OUTS_ID") == source_output:
+                        source_obj = out
+                        break
+            except Exception:
+                source_obj = src
+
+        result = tool.ConnectInput(input_name, source_obj)
+        return _ok(
+            result,
+            f"Connected '{tool_name}.{input_name}' <- '{source_tool}.{source_output}'.",
+            f"Error: Failed to connect '{tool_name}.{input_name}' from '{source_tool}'. "
+            f"Check the input and output IDs.",
+        )
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def fusion_set_input(
+    tool_name: str,
+    input_name: str,
+    value: str,
+    comp_index: int = 1,
+    time: Optional[int] = None,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Set a value on a Fusion tool input, verifying it by readback.
+
+    The string ``value`` is auto-coerced to int/float/bool where it looks
+    numeric/boolean (e.g. "1.0" -> 1, "true" -> True); otherwise it is passed
+    through as a string. After setting, the value is read back and compared.
+
+    If the readback does not match and ``value`` is a label string, an
+    integer-index fallback is attempted: OFX/ResolveFX enum ("choice") inputs
+    are addressed by index, not label, so the label is mapped to its index and
+    re-applied.
+
+    Parameters:
+    - tool_name: the tool whose input is being set.
+    - input_name: input ID (e.g. "Blend", "StyledText", "Size", "FilterType").
+    - value: value to set, as a string.
+    - comp_index: 1-based Fusion composition index on the item (default: 1).
+    - time: optional frame number for a keyframed value; omit for a static set.
+    - track_type / track_index / item_index: locate the timeline item.
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        comp = _get_fusion_comp(item, comp_index)
+        tool = _resolve_tool(comp, tool_name)
+
+        coerced = _coerce_value(value)
+
+        def _set(v: Any) -> None:
+            if time is not None:
+                tool.SetInput(input_name, v, time)
+            else:
+                tool.SetInput(input_name, v)
+
+        def _get() -> Any:
+            if time is not None:
+                return tool.GetInput(input_name, time)
+            return tool.GetInput(input_name)
+
+        _set(coerced)
+        readback = _get()
+
+        if _values_match(readback, coerced):
+            return json.dumps({
+                "success": True,
+                "tool_name": tool_name,
+                "input_name": input_name,
+                "value": coerced,
+                "readback": readback,
+            }, indent=2, default=str)
+
+        # Readback mismatch — try the OFX enum integer-index fallback when the
+        # value was an (unmatched) label string.
+        if isinstance(coerced, str):
+            idx = _ofx_enum_index(_input_object(tool, input_name), coerced)
+            if idx is not None:
+                _set(idx)
+                readback = _get()
+                return json.dumps({
+                    "success": True,
+                    "tool_name": tool_name,
+                    "input_name": input_name,
+                    "value": coerced,
+                    "resolved_index": idx,
+                    "readback": readback,
+                    "note": "OFX enum label mapped to integer index",
+                }, indent=2, default=str)
+
+        return json.dumps({
+            "success": True,
+            "tool_name": tool_name,
+            "input_name": input_name,
+            "value": coerced,
+            "readback": readback,
+            "warning": "readback did not match the requested value",
+        }, indent=2, default=str)
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def fusion_get_input(
+    tool_name: str,
+    input_name: str,
+    comp_index: int = 1,
+    time: Optional[int] = None,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Read the current value of a Fusion tool input.
+
+    Parameters:
+    - tool_name: the tool whose input is being read.
+    - input_name: input ID (e.g. "Blend", "StyledText", "Size").
+    - comp_index: 1-based Fusion composition index on the item (default: 1).
+    - time: optional frame number; omit to read at the current time.
+    - track_type / track_index / item_index: locate the timeline item.
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        comp = _get_fusion_comp(item, comp_index)
+        tool = _resolve_tool(comp, tool_name)
+        if time is not None:
+            value = tool.GetInput(input_name, time)
+        else:
+            value = tool.GetInput(input_name)
+        return json.dumps({
+            "tool_name": tool_name,
+            "input_name": input_name,
+            "value": value,
+        }, indent=2, default=str)
+    except Exception as e:
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def fusion_list_inputs(
+    tool_name: str,
+    comp_index: int = 1,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """List all inputs of a Fusion tool (their INPS_ID / INPS_Name / type).
+
+    Use this to discover the input IDs accepted by ``fusion_set_input`` /
+    ``fusion_get_input`` / ``fusion_connect_input``.
+
+    Parameters:
+    - tool_name: the tool to inspect.
+    - comp_index: 1-based Fusion composition index on the item (default: 1).
+    - track_type: "video" (default), "audio", or "subtitle".
+    - track_index: 1-based track index (default: 1).
+    - item_index: 0-based index of the item within that track (default: 0).
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+        comp = _get_fusion_comp(item, comp_index)
+        tool = _resolve_tool(comp, tool_name)
+        inputs = tool.GetInputList() or {}
+        result = []
+        for inp in inputs.values():
+            try:
+                attrs = inp.GetAttrs() or {}
+            except Exception:
+                attrs = {}
+            result.append({
+                "id": attrs.get("INPS_ID", ""),
+                "name": attrs.get("INPS_Name", ""),
+                "data_type": attrs.get("INPS_DataType", ""),
+            })
+        return json.dumps({
+            "tool_name": tool_name,
+            "input_count": len(result),
+            "inputs": result,
+        }, indent=2)
     except Exception as e:
         return f"Error: {e}"

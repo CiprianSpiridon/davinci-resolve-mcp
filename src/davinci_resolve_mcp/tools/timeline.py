@@ -22,7 +22,15 @@ from __future__ import annotations
 import json
 
 from ..app import mcp
-from ..helpers import _VALID_TRACK_TYPES, _coerce_value, _conn, _ok, _require_timeline
+from ..helpers import (
+    _VALID_TRACK_TYPES,
+    _check_choice,
+    _coerce_value,
+    _conn,
+    _get_timeline_item,
+    _ok,
+    _require_timeline,
+)
 from ..resolve_utils import timeline_item_to_dict, timeline_to_dict
 
 
@@ -507,6 +515,145 @@ def get_end_timecode() -> str:
                 "end_frame": end_frame,
                 "duration_frames": end_frame - start_frame + 1,
             }
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Range marks (mark in/out) & A/V clip linking ──────────────────────────
+
+_MARK_TYPES = ("video", "audio", "all")
+
+
+@mcp.tool()
+def get_timeline_mark_in_out() -> str:
+    """Get the current timeline's mark in/out range, as JSON.
+
+    Returns the dict from ``Timeline.GetMarkInOut()`` — typically keyed by
+    "video" and/or "audio", each mapping to a dict with "in" and "out" frame
+    numbers. An empty dict / message means no in-out range is currently set.
+    """
+    try:
+        timeline = _timeline()
+        if not hasattr(timeline, "GetMarkInOut"):
+            return "Error: GetMarkInOut is not available on this timeline object."
+        marks = timeline.GetMarkInOut()
+        if not marks:
+            return "No mark in/out range is currently set on the timeline."
+        return json.dumps(marks, indent=2, default=str)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_timeline_mark_in_out(mark_in: int, mark_out: int, mark_type: str = "all") -> str:
+    """Set the mark in/out range on the current timeline.
+
+    Parameters:
+    - mark_in: in-point frame number.
+    - mark_out: out-point frame number (must be >= mark_in).
+    - mark_type: which range to set — "video", "audio", or "all"
+      (default: "all").
+
+    Wraps ``Timeline.SetMarkInOut(mark_in, mark_out, mark_type)``.
+    """
+    try:
+        canonical, err = _check_choice(mark_type, _MARK_TYPES, "mark_type")
+        if err:
+            return f"Error: {err}"
+        timeline = _timeline()
+        if not hasattr(timeline, "SetMarkInOut"):
+            return "Error: SetMarkInOut is not available on this timeline object."
+        result = timeline.SetMarkInOut(mark_in, mark_out, canonical)
+        return _ok(
+            result,
+            f"Set {canonical} mark in/out to {mark_in}-{mark_out}.",
+            f"Error: Failed to set {canonical} mark in/out to {mark_in}-{mark_out}. "
+            "Check that the frames fall within the timeline's range and that "
+            "mark_out >= mark_in.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def clear_timeline_mark_in_out(mark_type: str = "all") -> str:
+    """Clear the mark in/out range on the current timeline.
+
+    Parameters:
+    - mark_type: which range to clear — "video", "audio", or "all"
+      (default: "all").
+
+    Wraps ``Timeline.ClearMarkInOut(mark_type)``.
+    """
+    try:
+        canonical, err = _check_choice(mark_type, _MARK_TYPES, "mark_type")
+        if err:
+            return f"Error: {err}"
+        timeline = _timeline()
+        if not hasattr(timeline, "ClearMarkInOut"):
+            return "Error: ClearMarkInOut is not available on this timeline object."
+        result = timeline.ClearMarkInOut(canonical)
+        return _ok(
+            result,
+            f"Cleared {canonical} mark in/out on the timeline.",
+            f"Error: Failed to clear {canonical} mark in/out (there may be no "
+            "range set for that type).",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_clips_linked(clips: list[dict] | None = None, linked: bool = True) -> str:
+    """Link or unlink two or more timeline items (e.g. an A/V clip pair).
+
+    Linked clips move and trim together on the timeline. This wraps
+    ``Timeline.SetClipsLinked([items], linked)``.
+
+    Parameters:
+    - clips: list of clip locator dicts, each with keys "track_type"
+      ("video"/"audio"/"subtitle"), "track_index" (1-based), and
+      "item_index" (0-based, as returned by get_timeline_items). At least
+      two clips are required.
+    - linked: True to link the clips together, False to unlink them
+      (default: True).
+    """
+    try:
+        if not clips or len(clips) < 2:
+            return (
+                "Error: set_clips_linked requires at least 2 clips "
+                f"(received {len(clips) if clips else 0}). Provide a list of "
+                "locator dicts with track_type/track_index/item_index."
+            )
+
+        items = []
+        for i, loc in enumerate(clips):
+            if not isinstance(loc, dict):
+                return (
+                    f"Error: clips[{i}] must be a dict with track_type, "
+                    "track_index and item_index."
+                )
+            try:
+                track_type = loc["track_type"]
+                track_index = int(loc["track_index"])
+                item_index = int(loc["item_index"])
+            except (KeyError, TypeError, ValueError):
+                return (
+                    f"Error: clips[{i}] must have track_type (str), "
+                    "track_index (int, 1-based) and item_index (int, 0-based)."
+                )
+            items.append(_get_timeline_item(track_type, track_index, item_index))
+
+        timeline = _timeline()
+        if not hasattr(timeline, "SetClipsLinked"):
+            return "Error: SetClipsLinked is not available on this timeline object."
+        result = timeline.SetClipsLinked(items, linked)
+        action = "linked" if linked else "unlinked"
+        return _ok(
+            result,
+            f"{action.capitalize()} {len(items)} timeline items.",
+            f"Error: Failed to set {len(items)} timeline items as {action}.",
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"

@@ -117,6 +117,61 @@ def set_clip_property(clip_name: str, property_name: str, property_value: str) -
         return f"Error: {e}"
 
 
+@mcp.tool()
+def set_input_color_space(clip_name: str, value: str) -> str:
+    """Set the Input Color Space of a media pool clip (color-managed projects only).
+
+    Wraps ``MediaPoolItem.SetClipProperty("Input Color Space", value)`` and then
+    verifies the change by reading the value back with ``GetClipProperty``. The
+    "Input Color Space" clip attribute is only writable when the project is in a
+    color-managed mode (DaVinci YRGB Color Managed or ACES) — in a plain
+    DaVinci YRGB project the set silently fails. This tool detects that case
+    (SetClipProperty returned False, or the read-back does not match the
+    requested value) and returns an explanatory error. It never changes the
+    project's color science mode to force the set through.
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the current media pool
+      folder.
+    - value: input color space name exactly as Resolve expects it, e.g.
+      "Rec.709 (Scene)", "Rec.709-A", "sRGB", "DaVinci Wide Gamut", or
+      "Project" to inherit the project's timeline color space.
+    """
+    try:
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "SetClipProperty"):
+            return "Error: SetClipProperty is not available on this clip object."
+        result = clip.SetClipProperty("Input Color Space", value)
+
+        # Verify via read-back — SetClipProperty can return truthy yet leave the
+        # value unchanged when the project is not color-managed.
+        readback = None
+        if hasattr(clip, "GetClipProperty"):
+            readback = clip.GetClipProperty("Input Color Space")
+
+        matched = readback is not None and str(readback).strip() == str(value).strip()
+
+        if not result or (readback is not None and not matched):
+            return (
+                f"Error: Failed to set Input Color Space of '{clip_name}' to "
+                f"{value!r} (read back {readback!r}). The 'Input Color Space' "
+                "clip attribute is only writable when the project uses a "
+                "color-managed color science mode (DaVinci YRGB Color Managed "
+                "or ACES); in a plain DaVinci YRGB project it is not editable. "
+                "Enable color management in Project Settings > Color Management "
+                "first, or check that the color space name is valid. The project "
+                "color science mode was left unchanged."
+            )
+
+        return _ok(
+            True,
+            f"Set Input Color Space of '{clip_name}' to {value!r}.",
+            "",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
 # ── Clip metadata ────────────────────────────────────────────────────────
 
 

@@ -12,6 +12,20 @@ the generic track-management tools in ``tools/timeline.py``:
   when it is disabled, so this tool is a thin, audio-scoped convenience
   wrapper around ``SetTrackEnable``).
 
+Fairlight mixing / preset tools:
+
+- ``set_audio_volume`` (``TimelineItem.SetAudioVolume``) — per-clip fader gain.
+- ``set_track_volume`` (``Timeline.SetTrackVolume("audio", ...)``) — per-track
+  fader gain.
+- ``get_fairlight_presets`` (``Resolve.GetFairlightPresets``) — list of saved
+  Fairlight presets.
+- ``apply_fairlight_preset`` (``Project.ApplyFairlightPresetToCurrentTimeline``)
+  — hasattr-guarded to degrade gracefully on Resolve Free / versions before
+  20.2.2 that lack the API.
+- ``insert_audio_at_playhead``
+  (``Project.InsertAudioToCurrentTrackAtPlayhead``) — insert an audio file at
+  the playhead on the selected Fairlight track.
+
 All tools reach Resolve lazily via ``_conn()``/``_require_timeline()`` inside
 their bodies — nothing here imports ``DaVinciResolveScript`` or touches a
 live Resolve instance at import time.
@@ -22,7 +36,7 @@ from __future__ import annotations
 import json
 
 from ..app import mcp
-from ..helpers import _conn, _ok, _require_timeline
+from ..helpers import _conn, _get_timeline_item, _ok, _require_timeline
 
 # ── Voice Isolation ─────────────────────────────────────────────────────
 
@@ -130,6 +144,155 @@ def set_track_mute(track_index: int, mute: bool = True) -> str:
             result,
             f"Audio track {track_index} {state}.",
             f"Error: Failed to {'mute' if mute else 'unmute'} audio track {track_index}.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Fairlight mixing ────────────────────────────────────────────────────
+
+
+@mcp.tool()
+def set_audio_volume(track_index: int, volume: float, item_index: int = 0) -> str:
+    """Set the fader volume (gain) of a single audio clip on the timeline.
+
+    Parameters:
+    - track_index: 1-based audio track index.
+    - volume: Fader gain to apply (``TimelineItem.SetAudioVolume``). In dB;
+      0 is unity, positive boosts, negative attenuates.
+    - item_index: 0-based index of the clip within the track (default: 0).
+
+    An audio track with no items, or an out-of-range ``item_index``, surfaces
+    the actionable ``_get_timeline_item`` error as a string.
+    """
+    try:
+        item = _get_timeline_item("audio", track_index, item_index)
+        result = item.SetAudioVolume(float(volume))
+        return _ok(
+            result,
+            f"Audio volume set to {float(volume)} on audio track {track_index}, "
+            f"item {item_index}.",
+            f"Error: Failed to set audio volume on audio track {track_index}, "
+            f"item {item_index}.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_track_volume(track_index: int, volume: float) -> str:
+    """Set the fader volume (gain) of a whole audio track on the timeline.
+
+    Parameters:
+    - track_index: 1-based audio track index.
+    - volume: Fader gain to apply to the track
+      (``Timeline.SetTrackVolume("audio", ...)``). In dB; 0 is unity.
+    """
+    try:
+        conn = _conn()
+        timeline = _require_timeline(conn)
+        result = timeline.SetTrackVolume("audio", track_index, float(volume))
+        return _ok(
+            result,
+            f"Audio track {track_index} volume set to {float(volume)}.",
+            f"Error: Failed to set volume on audio track {track_index}.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Fairlight presets ───────────────────────────────────────────────────
+
+
+@mcp.tool()
+def get_fairlight_presets() -> str:
+    """List the available Fairlight audio presets.
+
+    Returns a JSON list of preset names from ``Resolve.GetFairlightPresets()``.
+    On Resolve versions that lack this API, an explanatory string is returned
+    instead of an error.
+    """
+    try:
+        conn = _conn()
+        resolve = conn.get_resolve()
+        if not hasattr(resolve, "GetFairlightPresets"):
+            return (
+                "Fairlight presets are not available in this Resolve version "
+                "(Resolve.GetFairlightPresets is missing)."
+            )
+        presets = resolve.GetFairlightPresets()
+        return json.dumps({"presets": presets if presets else []})
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def apply_fairlight_preset(preset_name: str) -> str:
+    """Apply a Fairlight preset to the current timeline.
+
+    Uses ``Project.ApplyFairlightPresetToCurrentTimeline``. That API only
+    exists on newer builds (roughly Resolve 20.2.2+); on older builds — or on
+    Resolve Free without it — a graceful explanatory string is returned rather
+    than raising.
+
+    Parameters:
+    - preset_name: Name of the Fairlight preset (see ``get_fairlight_presets``).
+    """
+    try:
+        conn = _conn()
+        project = conn.get_project()
+        if not hasattr(project, "ApplyFairlightPresetToCurrentTimeline"):
+            return (
+                "Applying Fairlight presets is not available in this Resolve "
+                "version (Project.ApplyFairlightPresetToCurrentTimeline is "
+                "missing; requires Resolve 20.2.2+)."
+            )
+        result = project.ApplyFairlightPresetToCurrentTimeline(preset_name)
+        return _ok(
+            result,
+            f"Fairlight preset '{preset_name}' applied to the current timeline.",
+            f"Error: Failed to apply Fairlight preset '{preset_name}'.",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def insert_audio_at_playhead(
+    media_path: str,
+    start_offset_in_samples: int = 0,
+    duration_in_samples: int = 0,
+) -> str:
+    """Insert an audio file at the playhead on the selected Fairlight track.
+
+    Uses ``Project.InsertAudioToCurrentTrackAtPlayhead``. Resolve must be on
+    the Fairlight page with a track selected for this to succeed.
+
+    Parameters:
+    - media_path: Absolute path to the audio file to insert.
+    - start_offset_in_samples: Start offset within the source, in audio
+      samples (default: 0).
+    - duration_in_samples: Duration to insert, in audio samples (default: 0,
+      meaning the full clip).
+    """
+    try:
+        conn = _conn()
+        project = conn.get_project()
+        if not hasattr(project, "InsertAudioToCurrentTrackAtPlayhead"):
+            return (
+                "Inserting audio at the playhead is not available in this "
+                "Resolve version (Project.InsertAudioToCurrentTrackAtPlayhead "
+                "is missing)."
+            )
+        result = project.InsertAudioToCurrentTrackAtPlayhead(
+            media_path, int(start_offset_in_samples), int(duration_in_samples)
+        )
+        return _ok(
+            result,
+            f"Audio '{media_path}' inserted at the playhead on the selected "
+            f"Fairlight track.",
+            "Error: Failed to insert audio. Ensure the Fairlight page is "
+            "active with a track selected.",
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"

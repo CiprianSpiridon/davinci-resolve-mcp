@@ -18,7 +18,7 @@ result (which it commonly does instead of raising on failure).
 from __future__ import annotations
 
 from ..app import mcp
-from ..helpers import _conn
+from ..helpers import _check_choice, _conn
 
 
 def _pm():
@@ -439,5 +439,229 @@ def restore_project(file_path: str, project_name: str = "") -> str:
         if result:
             return f"Project restored successfully from '{file_path}'."
         return f"Error: Failed to restore project from '{file_path}'."
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Archive & Blackmagic Cloud project lifecycle ─────────────────────────
+
+# Attribute names on the Resolve object that hold the cloud-settings dict keys
+# (available on Studio, Resolve 18.5+). Guarded with hasattr at call time.
+_CLOUD_SETTING_KEYS = {
+    "project_name": "CLOUD_SETTING_PROJECT_NAME",
+    "project_media_path": "CLOUD_SETTING_PROJECT_MEDIA_PATH",
+    "is_collab": "CLOUD_SETTING_IS_COLLAB",
+    "sync_mode": "CLOUD_SETTING_SYNC_MODE",
+    "is_camera_access": "CLOUD_SETTING_IS_CAMERA_ACCESS",
+}
+
+# Friendly sync_mode -> attribute name on the Resolve object (resolve.CLOUD_SYNC_*).
+_CLOUD_SYNC_MODES = {
+    "none": "CLOUD_SYNC_NONE",
+    "proxy_only": "CLOUD_SYNC_PROXY_ONLY",
+    "proxy_and_orig": "CLOUD_SYNC_PROXY_AND_ORIG",
+}
+
+
+def _build_cloud_settings(resolve, values: dict) -> tuple:
+    """Build a resolve-native cloud-settings dict from friendly ``values``.
+
+    Resolves each ``CLOUD_SETTING_*`` key attribute (and the ``CLOUD_SYNC_*``
+    value for ``sync_mode``) off the live ``resolve`` object via ``getattr``,
+    guarding each lookup with ``hasattr``. Returns ``(settings_dict, None)`` on
+    success, or ``(None, error_message)`` if this Resolve build lacks the
+    required constants.
+
+    ``values`` maps friendly setting names (keys of ``_CLOUD_SETTING_KEYS``) to
+    already-validated values; entries whose value is ``None`` are skipped so a
+    caller can omit optional settings (e.g. on a subsequent cloud-project load).
+    """
+    settings = {}
+    for friendly, value in values.items():
+        if value is None:
+            continue
+        attr = _CLOUD_SETTING_KEYS[friendly]
+        if not hasattr(resolve, attr):
+            return None, (
+                "Error: Blackmagic Cloud project settings are not available in "
+                "this Resolve version (missing "
+                f"'{attr}'). Requires DaVinci Resolve Studio 18.5 or newer."
+            )
+        key = getattr(resolve, attr)
+        if friendly == "sync_mode":
+            sync_attr = _CLOUD_SYNC_MODES[value]
+            if not hasattr(resolve, sync_attr):
+                return None, (
+                    "Error: cloud sync modes are not available in this Resolve "
+                    f"version (missing '{sync_attr}'). Requires DaVinci Resolve "
+                    "Studio 18.5 or newer."
+                )
+            settings[key] = getattr(resolve, sync_attr)
+        else:
+            settings[key] = value
+    return settings, None
+
+
+@mcp.tool()
+def archive_project(
+    name: str,
+    path: str,
+    archive_src_media: bool = True,
+    archive_render_cache: bool = True,
+    archive_proxy_media: bool = False,
+) -> str:
+    """Archive a project by name to a ``.dra`` archive on disk.
+
+    Parameters:
+    - name: exact project name to archive (must exist in the current folder).
+    - path: destination path for the archive.
+    - archive_src_media: include source media (default True).
+    - archive_render_cache: include render cache (default True).
+    - archive_proxy_media: include proxy media (default False).
+
+    Resolve's ArchiveProject returns falsy (rather than raising) when the
+    named project does not exist or the archive cannot be written — this is
+    reported as a clear failure string.
+    """
+    try:
+        if not name or not name.strip():
+            return "Error: name must be a non-empty string identifying the project to archive."
+        if not path or not path.strip():
+            return "Error: path must be a non-empty string."
+        pm = _pm()
+        if not hasattr(pm, "ArchiveProject"):
+            return "Error: ArchiveProject is not available on this version of DaVinci Resolve."
+        result = pm.ArchiveProject(
+            name, path, archive_src_media, archive_render_cache, archive_proxy_media
+        )
+        if result:
+            return f"Project '{name}' archived to '{path}'."
+        return (
+            f"Error: Failed to archive project '{name}' to '{path}'. The "
+            "project may not exist in the current folder, or the destination "
+            "path may not be writable."
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def create_cloud_project(
+    name: str,
+    media_path: str,
+    sync_mode: str = "proxy_only",
+    is_collab: bool = False,
+    is_camera_access: bool = False,
+) -> str:
+    """Create a new Blackmagic Cloud project (DaVinci Resolve Studio 18.5+).
+
+    Parameters:
+    - name: name for the new cloud project.
+    - media_path: media location path for the cloud project (required).
+    - sync_mode: one of 'none', 'proxy_only', 'proxy_and_orig'
+      (default 'proxy_only').
+    - is_collab: enable collaboration mode (default False).
+    - is_camera_access: enable camera access (default False).
+
+    Not available on all Resolve builds — returns a 'not available in this
+    Resolve version' string (rather than raising) when CreateCloudProject or
+    the CLOUD_SETTING_*/CLOUD_SYNC_* constants are missing.
+    """
+    try:
+        if not name or not name.strip():
+            return "Error: name must be a non-empty string."
+        if not media_path or not media_path.strip():
+            return "Error: media_path must be a non-empty string."
+        mode, err = _check_choice(sync_mode, _CLOUD_SYNC_MODES.keys(), "sync_mode")
+        if err:
+            return f"Error: {err}"
+
+        conn = _conn()
+        pm = conn.get_project_manager()
+        if not hasattr(pm, "CreateCloudProject"):
+            return (
+                "Error: CreateCloudProject is not available in this Resolve "
+                "version. Blackmagic Cloud projects require DaVinci Resolve "
+                "Studio 18.5 or newer."
+            )
+        resolve = conn.get_resolve()
+        settings, cloud_err = _build_cloud_settings(
+            resolve,
+            {
+                "project_name": name,
+                "project_media_path": media_path,
+                "sync_mode": mode,
+                "is_collab": is_collab,
+                "is_camera_access": is_camera_access,
+            },
+        )
+        if cloud_err:
+            return cloud_err
+        project = pm.CreateCloudProject(settings)
+        if project is None:
+            return (
+                f"Error: Failed to create cloud project '{name}'. Check that "
+                "you are signed in to Blackmagic Cloud and that media_path is "
+                "valid."
+            )
+        return f"Cloud project '{name}' created and opened successfully."
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def load_cloud_project(
+    name: str,
+    media_path: str = "",
+    sync_mode: str = "",
+) -> str:
+    """Load an existing Blackmagic Cloud project (DaVinci Resolve Studio 18.5+).
+
+    Parameters:
+    - name: name of the cloud project to load.
+    - media_path: media location path — used on the first load only; leave
+      empty on subsequent loads.
+    - sync_mode: one of 'none', 'proxy_only', 'proxy_and_orig' — used on the
+      first load only; leave empty to omit.
+
+    Not available on all Resolve builds — returns a 'not available in this
+    Resolve version' string (rather than raising) when LoadCloudProject or the
+    CLOUD_SETTING_*/CLOUD_SYNC_* constants are missing.
+    """
+    try:
+        if not name or not name.strip():
+            return "Error: name must be a non-empty string."
+        mode = None
+        if sync_mode:
+            mode, err = _check_choice(sync_mode, _CLOUD_SYNC_MODES.keys(), "sync_mode")
+            if err:
+                return f"Error: {err}"
+
+        conn = _conn()
+        pm = conn.get_project_manager()
+        if not hasattr(pm, "LoadCloudProject"):
+            return (
+                "Error: LoadCloudProject is not available in this Resolve "
+                "version. Blackmagic Cloud projects require DaVinci Resolve "
+                "Studio 18.5 or newer."
+            )
+        resolve = conn.get_resolve()
+        settings, cloud_err = _build_cloud_settings(
+            resolve,
+            {
+                "project_name": name,
+                "project_media_path": media_path or None,
+                "sync_mode": mode,
+            },
+        )
+        if cloud_err:
+            return cloud_err
+        project = pm.LoadCloudProject(settings)
+        if project is None:
+            return (
+                f"Error: Failed to load cloud project '{name}'. It may not "
+                "exist, or you may not be signed in to Blackmagic Cloud."
+            )
+        return f"Cloud project '{name}' loaded successfully."
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
