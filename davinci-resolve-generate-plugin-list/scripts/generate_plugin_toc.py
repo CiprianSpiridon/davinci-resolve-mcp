@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import zipfile
 
@@ -139,15 +140,57 @@ def _load_scanners():
         )
 
 
+def _field(body: str, key: str) -> str:
+    m = re.search(rf'{key}\s*=\s*(?:"([^"]*)"|([^,\n}}]+))', body)
+    if not m:
+        return ""
+    return (m.group(1) if m.group(1) is not None else m.group(2)).strip()
+
+
+def _setting_controls(txt: str) -> dict:
+    """Extract the EXACT exposed controls from a Fusion ``.setting`` (offline, per template).
+
+    Published keys differ per template (verified live: ``mTuber_4_Lower_01`` exposes its
+    header text as ``Input7``, another template uses different keys) — so this records the
+    concrete addressing, never a generalized one:
+      * macro_tool  — the ``MacroOperator`` name = the tool_name once placed
+                      (verified: fusion_get_input(macro_tool, key) reads the live value).
+      * text_fields — [{"input": <published key>, "node": <SourceOp>}] for every exposed
+                      ``StyledText``. Set each via
+                      ``fusion_set_input(tool_name=macro_tool, input_name=input, value=…)``.
+      * groups      — the "<X> Controls" section labels (what the template is made of).
+      * n_controls  — total exposed control count.
+    Effects/transitions with no exposed text simply yield ``text_fields: []``.
+    """
+    m = re.search(r'(\w+)\s*=\s*MacroOperator\s*\{', txt)
+    macro_tool = m.group(1) if m else ""
+    blocks = re.findall(r'(\w+)\s*=\s*InstanceInput\s*\{(.*?)\}', txt, re.S)
+    text_fields: list = []
+    groups: list = []
+    for key, body in blocks:
+        # Editable text is a published input whose Source is a text-content input:
+        #   StyledText (TextPlus, e.g. mTuber/mAntique), Text (Follower, e.g. mKeynote/mPodcast),
+        #   Text1..N (numbered text, e.g. mKeynote Text Cascade), WordsText (countdowns).
+        # All are set identically — by the published key on the macro tool (verified live for
+        # StyledText). Numeric sources like Value / CountdownFormat are intentionally excluded.
+        if re.fullmatch(r"StyledText|Text\d*|WordsText", _field(body, "Source")):
+            text_fields.append({"input": key, "node": _field(body, "SourceOp")})
+        name = _field(body, "Name")
+        if name.endswith("Controls"):
+            g = name[: -len("Controls")].strip() or name
+            if g not in groups:
+                groups.append(g)
+    return {"n_controls": len(blocks), "macro_tool": macro_tool,
+            "text_fields": text_fields, "groups": groups}
+
+
 def _drfx_index(drfx_path: str) -> dict:
-    """{setting_basename: {"group": sub-group folder, "member": internal zip path}}.
+    """{setting_basename: {"group": sub-group, "member": zip path, "controls": {...}}}.
 
     A pack files templates as Edit/<Cat>/MotionVFX/<Pack>/<SubGroup>/.../<name>.setting.
-    The sub-group (Typography / Social Media / Infographics / Tools / Logos / …) is a
-    faithful description of what the template is for. ``member`` is the exact path
-    inside the .drfx ZIP, so use-plugins can extract the .setting and apply it via
-    ``apply_macro_to_clip`` (for Effects, or Titles applied as a macro). Flat packs
-    yield group "".
+    ``group`` describes what it's for; ``member`` is the exact path inside the .drfx ZIP
+    (so use-plugins can extract the .setting and apply it via ``apply_macro_to_clip``);
+    ``controls`` is the exposed-control summary (text fields to fill + section groups).
     """
     out: dict = {}
     try:
@@ -163,7 +206,11 @@ def _drfx_index(drfx_path: str) -> dict:
                         group = parts[i + 2]
                 base = os.path.basename(n)[: -len(".setting")]
                 if base:
-                    out[base] = {"group": group, "member": n}
+                    try:
+                        controls = _setting_controls(zf.read(n).decode("utf-8", "ignore"))
+                    except (OSError, RuntimeError):
+                        controls = {"n_controls": 0, "text_ops": [], "groups": []}
+                    out[base] = {"group": group, "member": n, "controls": controls}
     except (zipfile.BadZipFile, OSError, RuntimeError):
         pass
     return out
@@ -184,6 +231,7 @@ def build_manifest(stamp: str) -> dict:
         pack_path = t.get("path", "")
         t["description"] = t.get("category", "")
         t["member"] = ""
+        t["controls"] = {"n_controls": 0, "macro_tool": "", "text_fields": [], "groups": []}
         if pack_path.lower().endswith(".drfx"):
             if pack_path not in idx_cache:
                 idx_cache[pack_path] = _drfx_index(pack_path)
@@ -192,6 +240,7 @@ def build_manifest(stamp: str) -> dict:
             cat = t.get("category", "")
             t["description"] = f"{cat} › {group}" if group else cat
             t["member"] = info.get("member", "")
+            t["controls"] = info.get("controls", t["controls"])
 
     by_cat: dict = {}
     packs: dict = {}
@@ -205,7 +254,8 @@ def build_manifest(stamp: str) -> dict:
     def rows(pred):
         return sorted(
             ({"name": t["insert_name"], "description": t.get("description", ""),
-              "pack": t.get("pack", ""), "drfx": t.get("path", ""), "member": t.get("member", "")}
+              "pack": t.get("pack", ""), "drfx": t.get("path", ""), "member": t.get("member", ""),
+              "controls": t.get("controls", {"n_controls": 0, "macro_tool": "", "text_fields": [], "groups": []})}
              for t in templates if pred(t)),
             key=lambda r: (r["description"], r["name"]),
         )
@@ -236,7 +286,16 @@ def _title_lines(header, rows):
     out = [f"### {header}"]
     for r in rows:
         d = f" — _{r['description']}_" if r["description"] else ""
-        out.append(f"- `{r['name']}`{d}")
+        c = r.get("controls", {})
+        extra = ""
+        tf = c.get("text_fields", [])
+        if tf:
+            mt = c.get("macro_tool", "")
+            pairs = ", ".join(f"`{f['input']}`→{f['node']}" for f in tf)
+            extra += f"  · set text on `{mt}`: {pairs}"
+        if c.get("groups"):
+            extra += "  · sections: " + "/".join(c["groups"][:6])
+        out.append(f"- `{r['name']}`{d}{extra}")
     return out
 
 
@@ -282,10 +341,13 @@ def render_claude_block(m: dict, manifest_md_path: str) -> str:
         f"({c['templates_insertable']} insertable by name: {cats}), "
         f"**{c['resolvefx']} ResolveFX/OFX** effects, and **{c['ofx_bundles']}** third-party OFX bundles.",
         f"Template packs: {packs}.",
-        f"**Full names, descriptions & regids are in [`{os.path.basename(manifest_md_path)}`]"
-        f"({manifest_md_path})** — read it before inserting titles or applying effects; use the "
-        "`davinci-resolve-use-plugins` skill. Titles/generators are insertable via "
-        "`insert_template_by_name`; transitions/effects packs are GUI-only.",
+        "**Claude can USE all of these** — insert titles/generators (`insert_template_by_name`), "
+        "apply ResolveFX (`apply_ofx_to_clip`), and apply MotionVFX effect templates (extract the "
+        "`.setting` from the `.drfx` → `apply_macro_to_clip`); named transitions at a cut are the "
+        "one best-effort/GUI case. Do not tell the user these are unusable.",
+        f"Before using one, read the full TOC with descriptions + regids + `.setting` paths in "
+        f"[`{os.path.basename(manifest_md_path)}`]({manifest_md_path}) and follow the "
+        "**`davinci-resolve-use-plugins`** skill for the exact lane.",
         CLAUDE_END,
     ])
 
