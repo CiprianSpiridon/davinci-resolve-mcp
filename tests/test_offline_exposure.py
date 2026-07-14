@@ -7,7 +7,7 @@ mcp-offline-advanced plan, TASK-016..TASK-032) hold up their contract:
 
 - exactly the 18 documented offline tool names are registered, each exactly
   once, and they are globally unique against the other (live, Resolve-
-  connecting) tools registered by the server — 308 live + 18 offline = 326;
+  connecting) tools registered by the server — 315 live + 18 offline = 333;
 - every offline tool has a non-empty docstring;
 - every offline tool documents an ``action`` parameter (present in its
   input schema as a string) together with a written-out enum of the
@@ -102,20 +102,20 @@ def test_offline_tool_names_are_unique_within_themselves(tools):
 
 def test_offline_tool_names_are_unique_against_all_registered_tools(tools):
     # Global uniqueness across the whole server surface (live + offline):
-    # no offline name shadows/collides with any of the other 308 live
-    # (Resolve-connecting) tools, and the full surface is exactly 326.
+    # no offline name shadows/collides with any of the other 315 live
+    # (Resolve-connecting) tools, and the full surface is exactly 333.
     all_names = [t.name for t in tools]
     counts = Counter(all_names)
     duplicates = {name: n for name, n in counts.items() if n > 1}
     assert not duplicates, f"duplicate tool names registered: {duplicates}"
 
     live_names = [n for n in all_names if n not in OFFLINE_TOOL_NAMES]
-    assert len(live_names) == 308, (
-        f"expected 308 live (Resolve-connecting) tools alongside the 18 "
+    assert len(live_names) == 315, (
+        f"expected 315 live (Resolve-connecting) tools alongside the 18 "
         f"offline tools, found {len(live_names)}"
     )
-    assert len(all_names) == 326, (
-        f"expected 326 total registered tools (308 live + 18 offline), "
+    assert len(all_names) == 333, (
+        f"expected 333 total registered tools (315 live + 18 offline), "
         f"found {len(all_names)}"
     )
 

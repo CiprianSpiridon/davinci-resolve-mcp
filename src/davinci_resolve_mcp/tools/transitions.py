@@ -42,8 +42,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..app import mcp
@@ -77,6 +79,12 @@ def _default_output(file_path: str) -> str:
     """Derive a ``*.transition.<ext>`` output path next to ``file_path``."""
     base, ext = os.path.splitext(file_path)
     return f"{base}.transition{ext or '.drt'}"
+
+
+def _motionvfx_default_output(file_path: str) -> str:
+    """Derive a ``*-motionvfx.<ext>`` output path next to ``file_path``."""
+    base, ext = os.path.splitext(file_path)
+    return f"{base}-motionvfx{ext or '.drt'}"
 
 
 def _parse_cuts(cuts: Any) -> List[Any]:
@@ -365,6 +373,183 @@ def place_transition(
                     "byte-patched offline; 'verified': false — the written file "
                     "re-parses/validates offline only, a live DaVinci Resolve is "
                     "the final authority"
+                ),
+            },
+            indent=2,
+            default=str,
+        )
+    except transitions_fmt.DrtError as e:
+        return f"Error: {e}"
+    except Exception as e:  # noqa: BLE001 - tools never raise
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def place_motionvfx_transition(
+    name: str = "",
+    cut_frame: int = 0,
+    duration_frames: int = 0,
+    drt_in: str = "",
+    drt_out: str = "",
+    library_drt: str = "",
+) -> str:
+    """Place a MotionVFX *named* transition into a ``.drt``/``.drp`` offline.
+
+    A MotionVFX transition is a 2-``MediaIn`` clip Fusion comp that does **not**
+    export standalone (``ExportFusionComp`` returns ``false``), so it cannot be
+    rebuilt offline. Instead the real ``<Sm2TiTransition>`` element is harvested
+    from a reference timeline and copied into the target ``.drt``: its ``<Name>``
+    (template identity), ``<FieldsBlob>`` (which references the *installed*
+    template) and empty ``<CompositionBA/>`` are kept verbatim, while ``<Start>``
+    and ``<Duration>`` (plain XML frame tags) are set to the requested position
+    and a fresh ``<DbId>`` is assigned. The element is injected into the target
+    SeqContainer's video-track ``<Items>`` list (reusing the same byte-surgery as
+    :func:`place_transition`). Never connects to DaVinci Resolve.
+
+    This is a sibling of :func:`place_transition` (which builds a *native* SMPTE
+    dissolve from scratch); this one places an *installed MotionVFX* transition by
+    copying its element.
+
+    Parameters:
+    - name: the MotionVFX transition template name (e.g. ``"mTuber 3 Transition
+      01"``); matched case-insensitively against the library's ``<Name>`` tags.
+    - cut_frame: timeline frame written to the element's ``<Start>``.
+    - duration_frames: transition length written to the element's ``<Duration>``.
+    - drt_in: source ``.drt``/``.drp`` file the transition is injected into.
+    - drt_out: destination file; defaults to ``<drt_in>-motionvfx.<ext>``.
+    - library_drt: a reference ``.drt``/``.drp`` that contains the named
+      ``<Sm2TiTransition>`` element. Defaults to the
+      ``DAVINCI_MCP_TRANSITION_LIBRARY`` environment variable; if neither is set
+      an "Error: ..." string asks for one (the reference elements embed
+      proprietary MotionVFX data, so no library path is shipped as a default).
+
+    Returns a JSON string carrying the output path, the matched template name, the
+    fresh ``DbId``, the before/after ``<Sm2TiTransition>`` count on the target,
+    the offline re-validation result, and ``"verified": false``. A missing input
+    file, an absent library, or an unknown ``name`` (the message lists the
+    available names) all come back as an "Error: ..." string; this tool never
+    raises.
+    """
+    try:
+        if not isinstance(name, str) or not name.strip():
+            return "Error: name is required (a MotionVFX transition template name)"
+        if not isinstance(drt_in, str) or not drt_in.strip():
+            return "Error: drt_in is required (a .drt/.drp file on disk)"
+        if not os.path.isfile(drt_in):
+            return f"Error: no such file: {drt_in}"
+
+        try:
+            cut = int(cut_frame)
+        except (TypeError, ValueError):
+            return f"Error: cut_frame must be an integer frame, got {cut_frame!r}"
+
+        try:
+            dur = int(duration_frames)
+        except (TypeError, ValueError):
+            return f"Error: duration_frames must be an integer, got {duration_frames!r}"
+        if dur < 1:
+            return "Error: duration_frames must be >= 1"
+
+        lib = (
+            library_drt.strip()
+            if isinstance(library_drt, str) and library_drt.strip()
+            else os.environ.get("DAVINCI_MCP_TRANSITION_LIBRARY", "").strip()
+        )
+        if not lib:
+            return (
+                "Error: no transition library — pass library_drt=<a reference "
+                ".drt/.drp that contains the <Sm2TiTransition> element> or set the "
+                "DAVINCI_MCP_TRANSITION_LIBRARY environment variable (the MotionVFX "
+                "reference elements are proprietary/local, so none is shipped)"
+            )
+        if not os.path.isfile(lib):
+            return f"Error: no such library file: {lib}"
+
+        elements = transitions_fmt.read_transition_elements(lib)
+        if not elements:
+            return f"Error: no <Sm2TiTransition> elements found in library {lib}"
+
+        wanted = name.strip().lower()
+        matched = next(
+            (e for e in elements if (e["name"] or "").strip().lower() == wanted),
+            None,
+        )
+        if matched is None:
+            available = sorted({e["name"] for e in elements if e["name"]})
+            return (
+                f"Error: no MotionVFX transition named {name!r} in {lib}. "
+                f"Available ({len(available)}): " + ", ".join(available)
+            )
+
+        # Copy the element and re-stamp it: fresh DbId(s), new Start/Duration.
+        element = matched["element"]
+        fresh_ids: List[str] = []
+
+        def _fresh_dbid(_m: "re.Match[str]") -> str:
+            new_id = str(uuid.uuid4())
+            fresh_ids.append(new_id)
+            return f'DbId="{new_id}"'
+
+        element = re.sub(r'DbId="[^"]*"', _fresh_dbid, element)
+        new_dbid = fresh_ids[0] if fresh_ids else str(uuid.uuid4())
+
+        element, n_start = re.subn(
+            r"<Start>[^<]*</Start>", f"<Start>{cut}</Start>", element, count=1
+        )
+        element, n_dur = re.subn(
+            r"<Duration>[^<]*</Duration>",
+            f"<Duration>{dur}</Duration>",
+            element,
+            count=1,
+        )
+        if n_start == 0 or n_dur == 0:
+            return (
+                "Error: library element for "
+                f"{matched['name']!r} is missing a <Start>/<Duration> tag — "
+                "cannot position it"
+            )
+
+        out = (
+            drt_out.strip()
+            if isinstance(drt_out, str) and drt_out.strip()
+            else _motionvfx_default_output(drt_in)
+        )
+
+        with open(drt_in, "rb") as fh:
+            src = fh.read()
+
+        before = len(transitions_fmt.parse_native_transitions(src))
+        patched = transitions_fmt.inject_transition_element(src, element, track_index=0)
+
+        with open(out, "wb") as fh:
+            fh.write(patched)
+
+        # Offline re-validation of what was just written.
+        validation = drt_fmt.validate_drt(patched)
+        after = len(transitions_fmt.parse_native_transitions(patched))
+
+        return json.dumps(
+            {
+                "tool": "place_motionvfx_transition",
+                "output_path": out,
+                "bytes": len(patched),
+                "name": matched["name"],
+                "cut_frame": cut,
+                "duration_frames": dur,
+                "track": 1,
+                "track_type": "video",
+                "db_id": new_dbid,
+                "library_drt": lib,
+                "transition_count_before": before,
+                "transition_count_after": after,
+                "injected": after == before + 1,
+                "revalidated_offline": bool(validation.get("valid")),
+                "validation": validation,
+                "verified": False,
+                "note": (
+                    "live import (import_timeline_from_file) + confirming Resolve "
+                    "honours the XML <Start>/<Duration> on import is not yet "
+                    "verified"
                 ),
             },
             indent=2,

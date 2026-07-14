@@ -51,6 +51,7 @@ lazily inside each tool body via ``_conn``/``_get_timeline_item``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -263,6 +264,47 @@ def apply_ofx_to_clip(
         return f"Error: {e}"
 
 
+def _insert_template_item(timeline, canonical_kind: str, used_name: str):
+    """Insert a title/generator template at the playhead; return ``(item, retried_template_id)``.
+
+    Core of :func:`insert_template_by_name`, reused by :func:`cache_template_comp`.
+    Dispatches to the Timeline Insert* method for ``canonical_kind`` and, for a Fusion
+    title/generator, retries ONCE with the internal template-id form (see
+    :func:`_fusion_template_id`) when the display name returns None. ``item`` is None
+    when the name did not resolve (the caller reports that); raises ``RuntimeError``
+    when this Resolve build exposes no matching Insert* method — the caller's
+    ``try/except`` turns that into the same ``"Error: ..."`` string as before.
+    """
+    spec = _TEMPLATE_KINDS[canonical_kind]
+    method_name = spec["method"]
+    is_fusion = spec["fusion"]
+
+    insert = getattr(timeline, method_name, None)
+    if insert is None:
+        raise RuntimeError(
+            f"this Resolve build exposes no '{method_name}' — "
+            f"cannot insert a {canonical_kind} template."
+        )
+
+    item = insert(used_name)
+
+    # For Fusion titles/generators, a None result often means the display name
+    # did not resolve; retry ONCE with the internal template-id form.
+    retried_with: Optional[str] = None
+    if item is None and is_fusion:
+        template_id = _fusion_template_id(used_name)
+        if template_id and template_id != used_name:
+            retried_with = template_id
+            item = insert(template_id)
+        else:
+            # No distinct id form; still make the single documented retry so a
+            # transient None does not falsely error.
+            retried_with = used_name
+            item = insert(used_name)
+
+    return item, retried_with
+
+
 @mcp.tool()
 def insert_template_by_name(kind: str, name: str) -> str:
     """Insert a title / generator template at the playhead of the current timeline.
@@ -298,36 +340,13 @@ def insert_template_by_name(kind: str, name: str) -> str:
         if not name or not name.strip():
             return "Error: name is required (the template's display name)."
 
-        spec = _TEMPLATE_KINDS[canonical_kind]
-        method_name = spec["method"]
-        is_fusion = spec["fusion"]
-
         conn = _conn()
         timeline = _require_timeline(conn)
 
-        insert = getattr(timeline, method_name, None)
-        if insert is None:
-            return (
-                f"Error: this Resolve build exposes no '{method_name}' — "
-                f"cannot insert a {canonical_kind} template."
-            )
-
         used_name = name.strip()
-        item = insert(used_name)
-
-        # For Fusion titles/generators, a None result often means the display
-        # name did not resolve; retry ONCE with the internal template-id form.
-        retried_with: Optional[str] = None
-        if item is None and is_fusion:
-            template_id = _fusion_template_id(used_name)
-            if template_id and template_id != used_name:
-                retried_with = template_id
-                item = insert(template_id)
-            else:
-                # No distinct id form; still make the single documented retry
-                # so a transient None does not falsely error.
-                retried_with = used_name
-                item = insert(used_name)
+        item, retried_with = _insert_template_item(
+            timeline, canonical_kind, used_name
+        )
 
         if item is None:
             hint = (
@@ -359,6 +378,70 @@ def insert_template_by_name(kind: str, name: str) -> str:
         )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
+
+
+def _append_video_carrier(
+    clip,
+    start_frame: int,
+    end_frame: int,
+    track_index: int,
+    record_frame: int,
+    label: str = "",
+):
+    """Append a video-only carrier (``mediaType:1``) for ``clip`` onto ``track_index``.
+
+    Shared placement core of :func:`append_template_with_placement` and
+    :func:`place_overlay_title`: guards that the source duration is >= 4 frames and
+    that the target video track exists, builds ONE ``AppendToTimeline`` clipInfo
+    ``{mediaPoolItem, startFrame, endFrame, trackIndex, recordFrame, mediaType: 1}``,
+    and returns the placed ``TimelineItem``. Raises ``RuntimeError`` (which the calling
+    tool's ``try/except`` turns into an ``"Error: ..."`` string identical to the prior
+    inline guards) on any guard failure or when ``AppendToTimeline`` places nothing;
+    ``label`` only names ``clip`` in the empty-result message.
+    """
+    duration = int(end_frame) - int(start_frame)
+    if duration < 4:
+        raise RuntimeError(
+            f"source duration {duration} frame(s) is too short — "
+            f"need at least 4 frames (start_frame={start_frame}, "
+            f"end_frame={end_frame}, end is exclusive). Not appending."
+        )
+
+    if track_index < 1:
+        raise RuntimeError(f"track_index must be >= 1 (got {track_index}).")
+
+    conn = _conn()
+    timeline = _require_timeline(conn)
+
+    try:
+        track_count = timeline.GetTrackCount("video")
+    except Exception:  # noqa: BLE001
+        track_count = 0
+    if track_index > (track_count or 0):
+        raise RuntimeError(
+            f"video track {track_index} does not exist — timeline has "
+            f"{track_count or 0} video track(s). Add a track first. "
+            f"Not appending."
+        )
+
+    clip_info = {
+        "mediaPoolItem": clip,
+        "startFrame": int(start_frame),
+        "endFrame": int(end_frame),
+        "trackIndex": int(track_index),
+        "recordFrame": int(record_frame),
+        "mediaType": 1,
+    }
+
+    mp = _media_pool()
+    placed = mp.AppendToTimeline([clip_info]) or []
+    if not placed:
+        raise RuntimeError(
+            f"AppendToTimeline placed nothing for '{label}' on "
+            f"video track {track_index} at frame {record_frame}. Check the "
+            f"record frame does not collide and the track is unlocked."
+        )
+    return placed[0]
 
 
 @mcp.tool()
@@ -394,31 +477,6 @@ def append_template_with_placement(
     ``Error: ...`` string (including the duration/track guards) on failure.
     """
     try:
-        duration = int(end_frame) - int(start_frame)
-        if duration < 4:
-            return (
-                f"Error: source duration {duration} frame(s) is too short — "
-                f"need at least 4 frames (start_frame={start_frame}, "
-                f"end_frame={end_frame}, end is exclusive). Not appending."
-            )
-
-        if track_index < 1:
-            return f"Error: track_index must be >= 1 (got {track_index})."
-
-        conn = _conn()
-        timeline = _require_timeline(conn)
-
-        try:
-            track_count = timeline.GetTrackCount("video")
-        except Exception:  # noqa: BLE001
-            track_count = 0
-        if track_index > (track_count or 0):
-            return (
-                f"Error: video track {track_index} does not exist — timeline has "
-                f"{track_count or 0} video track(s). Add a track first. "
-                f"Not appending."
-            )
-
         clip = _find_media_pool_item(clip_name)
         if clip is None:
             return (
@@ -426,25 +484,11 @@ def append_template_with_placement(
                 f"Import it or check the name. Not appending."
             )
 
-        clip_info = {
-            "mediaPoolItem": clip,
-            "startFrame": int(start_frame),
-            "endFrame": int(end_frame),
-            "trackIndex": int(track_index),
-            "recordFrame": int(record_frame),
-            "mediaType": 1,
-        }
-
-        mp = _media_pool()
-        placed = mp.AppendToTimeline([clip_info]) or []
-        if not placed:
-            return (
-                f"Error: AppendToTimeline placed nothing for '{clip_name}' on "
-                f"video track {track_index} at frame {record_frame}. Check the "
-                f"record frame does not collide and the track is unlocked."
-            )
-
-        item = placed[0]
+        item = _append_video_carrier(
+            clip, start_frame, end_frame, track_index, record_frame,
+            label=clip_name,
+        )
+        duration = int(end_frame) - int(start_frame)
 
         styled_text_set = False
         if text:
@@ -1094,6 +1138,598 @@ def set_template_fields(
                 results.append({"field": field, "key": key, **res})
         return json.dumps({"success": True, "template": tpl_name, "macro_tool": macro,
                            "results": results}, indent=2, default=str, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── MotionVFX comp cache + placement (titles/generators, effects, classifier) ──
+# The MediaIn count of a placed element's Fusion comp is the ONE classifier: 0 =
+# title/generator (carrier on an upper track V2+), 1 = effect (on the clip's own
+# track), 2 = transition (offline .drt injection). A raw .drfx .setting renders
+# BLACK (bare MacroOperator, no output node) — so a title/generator comp must be
+# captured by exporting a NATIVELY-inserted item (which gains the real
+# ``MediaOut1 = Saver``) and an effect comp by exporting a GUI-placed reference
+# clip (which carries the wired ``MediaSource`` + ``MediaOut1``). Both are cached
+# to a per-package cache dir keyed by name and re-imported onto a carrier / clip.
+
+
+def _comp_cache_dir() -> str:
+    """Return (creating if needed) the Fusion comp cache directory.
+
+    ``$DAVINCI_MCP_CACHE_DIR`` overrides the default
+    ``~/.davinci-resolve-mcp/comp-cache``.
+    """
+    cache_dir = os.environ.get("DAVINCI_MCP_CACHE_DIR") or os.path.expanduser(
+        "~/.davinci-resolve-mcp/comp-cache"
+    )
+    os.makedirs(cache_dir, exist_ok=True)
+    return cache_dir
+
+
+def _comp_cache_path(name: str) -> str:
+    """Absolute cache path for a template/effect comp keyed by ``name``.
+
+    The filename is ``name`` with every character outside ``[A-Za-z0-9._-]``
+    replaced by ``_``, followed by a short hash of the EXACT ``name`` and a
+    ``.comp`` suffix; a pre-existing (non-empty) file means the comp is already
+    cached (the cache is idempotent). The hash disambiguates distinct names
+    (e.g. ``"mTuber 4 / Chapter"`` vs ``"mTuber-4-Chapter"``) that would sanitise
+    to the same slug, so they never collide onto one cache file.
+    """
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", name)
+    digest = hashlib.sha1(name.encode("utf-8")).hexdigest()[:8]
+    return os.path.join(_comp_cache_dir(), f"{safe}-{digest}.comp")
+
+
+def _atomic_export_comp(item, comp_path: str) -> bool:
+    """Export ``item``'s Fusion comp to ``comp_path`` atomically.
+
+    ``ExportFusionComp`` is written to a temp file in the same cache dir and only
+    ``os.replace``-d onto ``comp_path`` when the export returned truthy — so an
+    interrupted or falsy export never leaves a truncated/poisoned file at the
+    final path (which the existence-based idempotency check would then trust,
+    causing BLACK renders). Returns the export's truthiness.
+    """
+    tmp_path = f"{comp_path}.{os.getpid()}.tmp"
+    try:
+        exported = bool(item.ExportFusionComp(tmp_path, 1))
+        if exported and os.path.isfile(tmp_path) and os.path.getsize(tmp_path) > 0:
+            os.replace(tmp_path, comp_path)
+            return True
+        return False
+    finally:
+        if os.path.isfile(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
+def _get_or_create_scratch_timeline(project, media_pool, tl_name: str):
+    """Return the named scratch timeline, reusing it if present else creating one.
+
+    Used by :func:`cache_template_comp` so the one-time native insert+export never
+    disturbs a real edit. Returns None only when ``CreateEmptyTimeline`` fails.
+    """
+    try:
+        count = project.GetTimelineCount() or 0
+        for i in range(1, int(count) + 1):
+            tl = project.GetTimelineByIndex(i)
+            try:
+                if tl is not None and tl.GetName() == tl_name:
+                    return tl
+            except Exception:  # noqa: BLE001
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+    return media_pool.CreateEmptyTimeline(tl_name)
+
+
+def _first_video_carrier(min_frames: int):
+    """First Media Pool VIDEO clip whose source length >= ``min_frames`` (recursive), or None.
+
+    The carrier's own media is irrelevant — the imported comp generates the graphic
+    with alpha — so any long-enough video clip works. Audio-only items (no
+    resolution / an audio ``Type``) are skipped.
+    """
+    mp = _media_pool()
+    root = mp.GetRootFolder()
+    if root is None:
+        return None
+    stack = [root]
+    while stack:
+        folder = stack.pop()
+        for clip in folder.GetClipList() or []:
+            try:
+                frames = clip.GetClipProperty("Frames")
+                frames = int(frames) if str(frames).strip() else 0
+            except Exception:  # noqa: BLE001
+                frames = 0
+            if frames < int(min_frames):
+                continue
+            try:
+                res = clip.GetClipProperty("Resolution")
+            except Exception:  # noqa: BLE001
+                res = ""
+            try:
+                ctype = clip.GetClipProperty("Type") or ""
+            except Exception:  # noqa: BLE001
+                ctype = ""
+            if str(res).strip() or "video" in str(ctype).lower():
+                return clip
+        for sub in folder.GetSubFolderList() or []:
+            stack.append(sub)
+    return None
+
+
+def _item_index_on_track(track_type: str, track_index: int, item) -> int:
+    """0-based index of ``item`` on its track (matched by timeline start), or -1.
+
+    Lets :func:`place_overlay_title` address a freshly-appended carrier via the same
+    ``(track_type, track_index, item_index)`` locator :func:`attach_fusion_comp` /
+    :func:`set_template_fields` take. Items on one video track cannot overlap, so the
+    timeline start frame is a unique key.
+    """
+    conn = _conn()
+    timeline = _require_timeline(conn)
+    items = timeline.GetItemListInTrack(track_type, track_index) or []
+    try:
+        target_start = item.GetStart()
+    except Exception:  # noqa: BLE001
+        target_start = None
+    for idx, it in enumerate(items):
+        try:
+            if it.GetStart() == target_start:
+                return idx
+        except Exception:  # noqa: BLE001
+            continue
+    return -1
+
+
+def _maybe_json(text: str):
+    """Return ``text`` parsed as JSON when it is a JSON payload, else the raw string."""
+    try:
+        return json.loads(text)
+    except (ValueError, TypeError):
+        return text
+
+
+def _count_media_in_in_comp_text(txt: str) -> int:
+    r"""Count ``MediaIn`` tool declarations in raw Fusion comp/setting text (offline classifier).
+
+    Returns ``len(re.findall(r"= MediaIn \{", txt))`` — the same 0/1/2 lane signal
+    :func:`classify_timeline_element` derives live from ``GetToolList``, but from file
+    text so the offline fixture corpus can validate the MediaIn rule with no Resolve
+    running (0 = title/generator, 1 = effect, 2 = transition).
+    """
+    return len(re.findall(r"= MediaIn \{", txt))
+
+
+@mcp.tool()
+def cache_template_comp(name: str, pack: str = "") -> str:
+    """Capture (once) a correctly-wired title/generator Fusion comp for a template.
+
+    A raw ``.drfx`` ``.setting`` is a bare ``MacroOperator`` with no output node and
+    renders BLACK when imported. Resolve's native insert wraps it with a real output
+    (``MediaOut1 = Saver``, ``Source="Output"``) — so this inserts the template
+    natively on a hidden scratch timeline (``_mcp_comp_cache (scratch)``) and exports
+    that item's comp, giving a comp that actually renders.
+
+    Idempotent: if the cache file already exists it is returned without re-exporting
+    (``cached: true``). Otherwise the template is inserted (via the same resolution +
+    Insert* path as :func:`insert_template_by_name`, ``kind="fusion_title"``),
+    ``ExportFusionComp`` writes the cache, the scratch item is cleaned up, and the
+    result carries ``cached: false``. LIVE-ONLY — returns ``Error: ...`` when Resolve,
+    the insert, or the export is unavailable.
+
+    Parameters:
+    - name: the template insert/display name (as from ``enumerate_templates``).
+    - pack: optional source ``.drfx`` (advisory; the native insert resolves by name).
+
+    Returns JSON ``{success, name, comp_path, cached}`` or an ``Error: ...`` string.
+    """
+    try:
+        if not name or not name.strip():
+            return "Error: name is required (the template's insert/display name)."
+
+        comp_path = _comp_cache_path(name)
+        if os.path.isfile(comp_path) and os.path.getsize(comp_path) > 0:
+            return json.dumps(
+                {"success": True, "name": name, "comp_path": comp_path,
+                 "cached": True},
+                indent=2,
+            )
+
+        conn = _conn()
+        project = conn.get_project()
+        media_pool = _media_pool()
+
+        scratch_name = "_mcp_comp_cache (scratch)"
+        scratch = _get_or_create_scratch_timeline(project, media_pool, scratch_name)
+        if scratch is None:
+            return (
+                f"Error: could not create the scratch timeline '{scratch_name}' "
+                f"for the one-time comp capture."
+            )
+
+        prev_timeline = None
+        try:
+            prev_timeline = project.GetCurrentTimeline()
+        except Exception:  # noqa: BLE001
+            prev_timeline = None
+
+        exported = False
+        try:
+            project.SetCurrentTimeline(scratch)
+            item, _retried = _insert_template_item(
+                scratch, "fusion_title", name.strip()
+            )
+            if item is None:
+                return (
+                    f"Error: template not resolved — '{name}' did not insert as a "
+                    f"fusion_title. Check the name exists in the Edit page "
+                    f"Titles/Generators list."
+                )
+
+            # The native export gains the real MediaOut1 = Saver the raw .setting
+            # lacks (a raw .setting renders BLACK). Atomic: only lands on
+            # comp_path when the export succeeded, so a partial write can't poison
+            # the existence-based cache.
+            exported = _atomic_export_comp(item, comp_path)
+
+            # Clean up the scratch item (best effort — the export is what matters).
+            try:
+                scratch.DeleteClips([item])
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            # Restore whatever timeline was current before the capture.
+            if prev_timeline is not None:
+                try:
+                    project.SetCurrentTimeline(prev_timeline)
+                except Exception:  # noqa: BLE001
+                    pass
+
+        if not exported:
+            return (
+                f"Error: ExportFusionComp returned falsy for '{name}' — no comp "
+                f"cached. Confirm the template inserted on the scratch timeline."
+            )
+
+        return json.dumps(
+            {"success": True, "name": name, "comp_path": comp_path,
+             "cached": False},
+            indent=2,
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def place_overlay_title(
+    name: str,
+    track_index: int,
+    record_frame: int,
+    duration_frames: int,
+    fields: str = "",
+    carrier_clip: str = "",
+    pack: str = "",
+) -> str:
+    """Place a MotionVFX title/generator as an overlay on an upper track (V2+).
+
+    Full chain: ensure the template's comp is cached (:func:`cache_template_comp`),
+    place a video-only carrier of ``duration_frames`` on ``track_index`` at
+    ``record_frame`` (the ``AppendToTimeline`` ``mediaType:1`` mechanism shared with
+    :func:`append_template_with_placement`), import the cached comp onto that carrier
+    (:func:`attach_fusion_comp`), and — when ``fields`` is given — apply them via
+    :func:`set_template_fields` (``name=`` is passed because the carrier item's name
+    is NOT the template name). Overlays NEVER go on V1, so ``track_index`` must be
+    >= 2; ``duration_frames`` must be >= 4.
+
+    Parameters:
+    - name: template insert/display name.
+    - track_index: 1-based OVERLAY video track (>= 2, never V1).
+    - record_frame: timeline frame to start the overlay at.
+    - duration_frames: on-screen length in frames (>= 4).
+    - fields: optional JSON ``{control_name_or_key: value}`` for the template.
+    - carrier_clip: optional Media Pool clip to use as the carrier; when empty the
+      first video clip with a long-enough source is auto-picked.
+    - pack: optional source ``.drfx`` (forwarded to cache_template_comp; advisory).
+
+    Returns JSON with the placed locator + a ``verify_hint``, or an ``Error: ...``
+    string. (Confirming V1/A1 item counts are unchanged is the caller's check.)
+    """
+    try:
+        if track_index < 2:
+            return (
+                f"Error: track_index must be >= 2 — overlays never go on V1 "
+                f"(the footage track). Got {track_index}."
+            )
+        if duration_frames < 4:
+            return f"Error: duration_frames must be >= 4 (got {duration_frames})."
+
+        cache_result = cache_template_comp(name, pack)
+        if cache_result.startswith("Error"):
+            return cache_result
+        try:
+            comp_path = json.loads(cache_result)["comp_path"]
+        except (ValueError, KeyError, TypeError):
+            return (
+                f"Error: could not obtain a cached comp path for '{name}': "
+                f"{cache_result}"
+            )
+
+        if carrier_clip and carrier_clip.strip():
+            clip = _find_media_pool_item(carrier_clip.strip())
+            if clip is None:
+                return (
+                    f"Error: carrier_clip '{carrier_clip}' not found in the Media "
+                    f"Pool. Import it or check the name."
+                )
+        else:
+            clip = _first_video_carrier(duration_frames)
+            if clip is None:
+                return (
+                    f"Error: no Media Pool video clip with a source length >= "
+                    f"{duration_frames} frames found to use as a carrier. Pass "
+                    f"carrier_clip= with a long-enough clip."
+                )
+
+        item = _append_video_carrier(
+            clip, 0, duration_frames, track_index, record_frame, label=name
+        )
+
+        item_index = _item_index_on_track("video", track_index, item)
+        if item_index < 0:
+            return (
+                f"Error: placed the carrier but could not locate it on video "
+                f"track {track_index} to import the comp."
+            )
+
+        attach_result = attach_fusion_comp(
+            "video", track_index, item_index, comp_path
+        )
+        if attach_result.startswith("Error"):
+            return attach_result
+
+        fields_result = None
+        fields_ok = True
+        if fields and fields.strip():
+            # name= is REQUIRED: the carrier item's name != the template name.
+            fields_result = _maybe_json(
+                set_template_fields(
+                    fields, "video", track_index, item_index, 1, name
+                )
+            )
+            # set_template_fields returns an "Error: ..." string on schema/control
+            # failure; surface that so a caller doesn't read placement-only as
+            # fully configured.
+            fields_ok = not (
+                isinstance(fields_result, str)
+                and fields_result.startswith("Error")
+            )
+
+        try:
+            carrier_name = clip.GetName()
+        except Exception:  # noqa: BLE001
+            carrier_name = ""
+
+        return json.dumps(
+            {
+                "success": True,
+                "name": name,
+                "comp_path": comp_path,
+                "track_type": "video",
+                "track_index": track_index,
+                "item_index": item_index,
+                "record_frame": record_frame,
+                "duration_frames": duration_frames,
+                "carrier_clip": carrier_name,
+                "fields_result": fields_result,
+                "fields_ok": fields_ok,
+                "verify_hint": (
+                    "export_current_frame at a hold frame (titles are kinetic — "
+                    "mid-sweep frames may look empty)."
+                ),
+            },
+            indent=2,
+            default=str,
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def cache_effect_comp(
+    name: str,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Capture a 1-MediaIn effect comp from a GUI-placed reference clip.
+
+    A MotionVFX effect placed on a clip is a 1-MediaIn Fusion comp
+    (``MediaSource`` -> macro -> ``MediaOut1 = Saver``). Exporting that already-wired
+    comp yields a reusable effect :func:`apply_clip_effect` can import onto any clip —
+    the raw ``.setting`` macro alone renders BLACK. ``ExportFusionComp`` returns FALSE
+    for a 2-MediaIn transition (it cannot carry both neighbour feeds), reported as a
+    clear error. Cached keyed by ``name``.
+
+    Parameters:
+    - name: effect name to key the cache by (the macro/template name).
+    - track_type / track_index / item_index: locate the GUI-placed reference clip.
+
+    Returns JSON ``{success, name, comp_path}`` or an ``Error: ...`` string.
+    """
+    try:
+        if not name or not name.strip():
+            return "Error: name is required (the effect name to key the cache by)."
+
+        comp_path = _comp_cache_path(name)
+        item = _get_timeline_item(track_type, track_index, item_index)
+        exported = _atomic_export_comp(item, comp_path)
+        if not exported:
+            return (
+                f"Error: '{name}' did not export (a 2-MediaIn transition can't "
+                f"export standalone — use place_motionvfx_transition / the .drt "
+                f"route)."
+            )
+        return json.dumps(
+            {"success": True, "name": name, "comp_path": comp_path}, indent=2
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def apply_clip_effect(
+    name: str,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+    fields: str = "",
+) -> str:
+    """Apply a cached effect comp onto a target clip (on the clip's OWN track).
+
+    An effect processes the clip it is ON — so it is imported onto the target clip's
+    own track, NOT an upper carrier (that is the title/generator lane). Looks up the
+    cached ``.comp`` for ``name`` (run :func:`cache_effect_comp` first if missing),
+    imports it via :func:`attach_fusion_comp`, and — when ``fields`` is given — applies
+    them via :func:`set_template_fields`.
+
+    Parameters:
+    - name: the cached effect name (see :func:`cache_effect_comp`).
+    - track_type / track_index / item_index: locate the TARGET clip.
+    - fields: optional JSON ``{control_name_or_key: value}`` for the effect's controls.
+
+    Returns JSON with the applied locator + a ``verify_hint``, or an ``Error: ...``
+    string.
+    """
+    try:
+        if not name or not name.strip():
+            return "Error: name is required (the cached effect name)."
+
+        comp_path = _comp_cache_path(name)
+        if not os.path.isfile(comp_path):
+            return (
+                f"Error: no cached effect comp for '{name}' at {comp_path}. Run "
+                f"cache_effect_comp('{name}', ...) from a GUI-placed reference "
+                f"clip first."
+            )
+
+        attach_result = attach_fusion_comp(
+            track_type, track_index, item_index, comp_path
+        )
+        if attach_result.startswith("Error"):
+            return attach_result
+
+        fields_result = None
+        fields_ok = True
+        if fields and fields.strip():
+            fields_result = _maybe_json(
+                set_template_fields(
+                    fields, track_type, track_index, item_index, 1, name
+                )
+            )
+            # An "Error: ..." string means field-setting did nothing; flag it so
+            # a caller doesn't read attach-only as fully configured.
+            fields_ok = not (
+                isinstance(fields_result, str)
+                and fields_result.startswith("Error")
+            )
+
+        return json.dumps(
+            {
+                "success": True,
+                "name": name,
+                "comp_path": comp_path,
+                "track_type": track_type,
+                "track_index": track_index,
+                "item_index": item_index,
+                "fields_result": fields_result,
+                "fields_ok": fields_ok,
+                "verify_hint": (
+                    "export_current_frame (this render path is not yet "
+                    "live-verified for a 1-MediaIn effect)."
+                ),
+            },
+            indent=2,
+            default=str,
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def classify_timeline_element(
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+) -> str:
+    """Classify a placed timeline element by its Fusion comp's MediaIn count.
+
+    The universal MotionVFX classifier: every placed element is a clip Fusion comp;
+    counting its ``MediaIn`` tools picks the placement lane — 0 = title/generator
+    (upper-track carrier, V2+), 1 = effect (apply on the clip's own track), 2 =
+    transition (offline ``.drt`` injection). Reads ONLY ``GetToolList`` + per-tool
+    ``GetAttrs`` (+ the macro's ``.Name``); it never walks tool input lists, which
+    hangs Resolve. An item with no Fusion comp is reported as ``has_comp: false``.
+
+    Parameters:
+    - track_type / track_index / item_index: locate the timeline element.
+
+    Returns JSON ``{success, has_comp, macro, media_in, lane}`` (or ``{success,
+    has_comp: false, note}`` when there is no comp), or an ``Error: ...`` string.
+    """
+    try:
+        item = _get_timeline_item(track_type, track_index, item_index)
+
+        comp = None
+        try:
+            comp = item.GetFusionCompByIndex(1)
+        except Exception:  # noqa: BLE001
+            comp = None
+        if comp is None:
+            return json.dumps(
+                {"success": True, "has_comp": False,
+                 "note": "not a template element"},
+                indent=2,
+            )
+
+        tools = comp.GetToolList(False) or {}
+        macro: Optional[str] = None
+        media_in = 0
+        for tool in tools.values():
+            try:
+                reg_id = tool.GetAttrs("TOOLS_RegID")
+            except Exception:  # noqa: BLE001
+                reg_id = None
+            if reg_id == "MacroOperator":
+                if macro is None:
+                    try:
+                        macro = tool.Name
+                    except Exception:  # noqa: BLE001
+                        macro = None
+            elif reg_id == "MediaIn":
+                media_in += 1
+
+        lane = {
+            0: "title_generator (place on an upper-track carrier, V2+)",
+            1: "effect (apply on the clip's own track)",
+            2: "transition (offline .drt injection)",
+        }.get(media_in, "unknown")
+
+        return json.dumps(
+            {
+                "success": True,
+                "has_comp": True,
+                "macro": macro,
+                "media_in": media_in,
+                "lane": lane,
+            },
+            indent=2,
+            default=str,
+        )
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
 

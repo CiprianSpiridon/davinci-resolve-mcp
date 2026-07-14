@@ -118,6 +118,75 @@ def set_clip_property(clip_name: str, property_name: str, property_value: str) -
 
 
 @mcp.tool()
+def set_super_scale(clip_name: str, mode: int) -> str:
+    """Set the Super Scale (AI upscale) factor on a media pool clip.
+
+    Super Scale is a **MediaPoolItem** property, not a timeline-item property:
+    it lives on the source clip, so setting it here propagates to **every**
+    timeline instance of that source. Wraps
+    ``MediaPoolItem.SetClipProperty("Super Scale", <int>)`` and then verifies
+    the change by reading it back with ``GetClipProperty("Super Scale")``.
+
+    The value **must be an integer** — the Resolve API silently rejects the
+    string form (e.g. the string ``"2"`` returns ``False`` while the int ``2``
+    returns ``True``), so ``mode`` is coerced to ``int`` before the call.
+    Requires Resolve Studio (Super Scale is a Studio-only feature).
+
+    Parameters:
+    - clip_name: name of the clip, as it appears in the current media pool
+      folder.
+    - mode: Super Scale factor as an integer — one of 1 = Auto/off, 2 = 2x,
+      3 = 3x, 4 = 4x.
+    """
+    try:
+        try:
+            mode_int = int(mode)
+        except (ValueError, TypeError):
+            return (
+                f"Error: Invalid Super Scale mode {mode!r}. Must be an integer: "
+                "1 (Auto/off), 2 (2x), 3 (3x), or 4 (4x)."
+            )
+        if mode_int not in (1, 2, 3, 4):
+            return (
+                f"Error: Invalid Super Scale mode {mode_int}. Must be one of: "
+                "1 (Auto/off), 2 (2x), 3 (3x), 4 (4x)."
+            )
+
+        clip = _find_clip(clip_name)
+        if not hasattr(clip, "SetClipProperty"):
+            return "Error: SetClipProperty is not available on this clip object."
+        result = clip.SetClipProperty("Super Scale", mode_int)
+
+        # Verify via read-back — "Super Scale" reads back as an int. Passing the
+        # string form silently fails, so a truthy `result` alone isn't enough.
+        readback = None
+        if hasattr(clip, "GetClipProperty"):
+            readback = clip.GetClipProperty("Super Scale")
+        try:
+            matched = readback is not None and int(readback) == mode_int
+        except (ValueError, TypeError):
+            matched = False
+
+        if not result or not matched:
+            return (
+                f"Error: Failed to set Super Scale of '{clip_name}' to "
+                f"{mode_int} (read back {readback!r}). Super Scale must be an "
+                "integer 1-4 and is a Resolve Studio-only feature; check that "
+                "you are running Resolve Studio."
+            )
+
+        return _ok(
+            True,
+            f"Set Super Scale of '{clip_name}' to {int(readback)}. This is a "
+            "MediaPoolItem property and applies to every timeline instance of "
+            "this source.",
+            "",
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
 def set_input_color_space(clip_name: str, value: str) -> str:
     """Set the Input Color Space of a media pool clip (color-managed projects only).
 

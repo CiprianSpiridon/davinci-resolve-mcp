@@ -107,6 +107,36 @@ macro's inputs is fine; walking **every** tool is what hangs. The offline `.sett
 of truth for a template's controls + defaults and is stable regardless of the running server
 build — so there's no reason to pay the (Resolve-hanging) cost of full live graph introspection.
 
+## 11. MotionVFX + AI automation — durable invariants (element type = MediaIn count)
+The MotionVFX pipeline is proven live. Once an element is on a timeline it's a clip Fusion comp;
+count its `MediaIn` tools (`GetFusionCompByIndex(1).GetToolList(False)`) and that number **is** the
+placement lane — read it, then dispatch. These are the invariants; don't regress them:
+- **Classifier: 0 = title/generator** (carrier on an upper track), **1 = effect** (apply on the
+  clip's own track), **2 = transition** (offline `.drt` injection).
+- **`ExportFusionComp` succeeds for 0- and 1-MediaIn comps, returns `False` for 2-MediaIn
+  transitions** (a standalone `.comp` can't carry both neighbour feeds) → titles + effects are
+  file-cacheable; transitions must go the `.drt` route.
+- **A raw `.drfx` `.setting` renders BLACK** (bare `MacroOperator`, no output node). Never
+  hand-build the scaffold — **round-trip a native or exported comp**, which gains the real output
+  node **`MediaOut1 = Saver`** wired `Source="Output"`. (For a 1-MediaIn effect the exported comp
+  also carries a `MediaSource` MediaIn that Resolve re-binds to the target clip on import.)
+- **`export_current_frame` is the ONLY reliable composite check.** `get_current_thumbnail` shows one
+  clip's Color-page output — **black** for an alpha overlay — and lies. Titles are kinetic; sample a
+  hold frame, not frame 0.
+- **Super Scale set needs an INT** (a string returns `False`). It's a MediaPoolItem property, so it
+  propagates to every timeline instance of that source.
+- **Dynamic Zoom enable + framing rects are NOT scriptable** — only the easing (`DynamicZoomEase`).
+  For a scripted push-in / Ken-Burns use `add_transform_keyframe` (ZoomX/ZoomY/Pan/Tilt, after
+  `set_keyframe_mode(1)`).
+- **`Insert*` targets V1 and can't be redirected** — overlays go on an upper track via
+  `AppendToTimeline(trackIndex>=2, mediaType:1)`, and its `endFrame` is **EXCLUSIVE**. Locking V1
+  makes an insert **fail**, it does not redirect.
+- Save with **`pm.SaveProject()`** (not `project.SaveProject()`).
+- **Resolve proxy objects make `hasattr` ALWAYS true** — never probe for a method that way; call it
+  and handle the falsy/`None` result.
+- **Don't walk the full Fusion graph live** (see §10) — `GetToolList` per clip in small batches,
+  classify, export only the few you need.
+
 ---
 
 ### General reminders that reinforce the above

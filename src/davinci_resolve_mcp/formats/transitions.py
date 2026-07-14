@@ -53,7 +53,9 @@ from .drt import DrtError
 __all__ = [
     "DrtError",
     "inject_native_transition",
+    "inject_transition_element",
     "parse_native_transitions",
+    "read_transition_elements",
 ]
 
 _Data = Union[str, bytes, bytearray]
@@ -69,6 +71,23 @@ _VIDEO_VEC_RE = re.compile(r"<VideoTrackVec>([\s\S]*?)</VideoTrackVec>")
 _TRANSITION_RE = re.compile(
     r'<Sm2TiTransition\b[^>]*?DbId="([^"]+)"[^>]*>([\s\S]*?)</Sm2TiTransition>'
 )
+
+
+def _load_seq_xml(data_or_xml: _Data, member: Optional[str]) -> str:
+    """Return the target SeqContainer XML from a path/bytes archive or raw XML.
+
+    Accepts a ``.drt`` / ``.drp`` file path or bytes (the target SeqContainer is
+    resolved via :func:`_resolve_member`) or the raw SeqContainer XML text itself.
+    """
+    if isinstance(data_or_xml, str) and "<Sm2SequenceContainer" in data_or_xml:
+        return data_or_xml
+    buf = _drt._load_bytes(data_or_xml)
+    try:
+        members = _drt._read_members(buf)
+    except zipfile.BadZipFile as e:
+        raise DrtError(f"not a valid .drt/.drp zip: {e}") from e
+    target = _resolve_member(members, member)
+    return members[target].decode("utf-8", errors="replace")
 
 
 def _resolve_member(members: "Dict[str, bytes]", member: Optional[str]) -> str:
@@ -294,17 +313,7 @@ def parse_native_transitions(
     ``{"dbId", "start", "duration", "alignmentType", "inOffset", "outOffset",
     "transitionType", "name"}``.
     """
-    xml: Optional[str] = None
-    if isinstance(data_or_xml, str) and "<Sm2SequenceContainer" in data_or_xml:
-        xml = data_or_xml
-    else:
-        buf = _drt._load_bytes(data_or_xml)
-        try:
-            members = _drt._read_members(buf)
-        except zipfile.BadZipFile as e:
-            raise DrtError(f"not a valid .drt/.drp zip: {e}") from e
-        target = _resolve_member(members, member)
-        xml = members[target].decode("utf-8", errors="replace")
+    xml = _load_seq_xml(data_or_xml, member)
 
     out: List[Dict[str, Any]] = []
     for m in _TRANSITION_RE.finditer(xml):
@@ -324,3 +333,124 @@ def parse_native_transitions(
             }
         )
     return out
+
+
+def read_transition_elements(
+    data_or_xml: _Data,
+    member: Optional[str] = None,
+) -> List[Dict[str, str]]:
+    """Return every ``<Sm2TiTransition>`` on a SeqContainer as raw elements.
+
+    Each entry is ``{"name": <Name text or "">, "dbId": <DbId attr>, "element":
+    <verbatim <Sm2TiTransition>…</Sm2TiTransition> XML>}`` in document order.
+    Unlike :func:`parse_native_transitions` (which decodes the scalar fields),
+    this preserves the *verbatim* element — including the MotionVFX
+    ``<FieldsBlob>`` / ``<CompositionTable>`` / empty ``<CompositionBA/>`` — so a
+    named MotionVFX transition can be copied wholesale into another timeline's
+    ``<Items>`` list (its 2-``MediaIn`` comp does not export standalone).
+
+    ``data_or_xml`` may be a ``.drt`` / ``.drp`` path or bytes, or the raw
+    SeqContainer XML text itself.
+    """
+    xml = _load_seq_xml(data_or_xml, member)
+    out: List[Dict[str, str]] = []
+    for m in _TRANSITION_RE.finditer(xml):
+        inner = m.group(2)
+        out.append(
+            {
+                "name": _drt._extract_scalar(inner, "Name") or "",
+                "dbId": m.group(1),
+                "element": m.group(0),
+            }
+        )
+    return out
+
+
+def inject_transition_element(
+    data: _Data,
+    element_xml: str,
+    *,
+    track_index: int = 0,
+    member: Optional[str] = None,
+) -> bytes:
+    """Splice a pre-built ``<Sm2TiTransition>`` into a video track's ``<Items>``.
+
+    Copies the target ``.drt`` / ``.drp`` archive and inserts ``element_xml``
+    verbatim at the end of the ``track_index`` video track's populated
+    ``<Items>`` clip list, then returns the rebuilt archive bytes. When the
+    surrounding items use the real-Resolve ``<Element>`` wrapper convention the
+    new element is wrapped to match; a tool-authored (bare-child) ``<Items>``
+    gets a bare child. Every other clip's ``<Start>`` / ``<Duration>`` and every
+    other archive member re-parse identically.
+
+    Shares the ``VideoTrackVec`` / ``Sm2TiTrack`` / ``<Items>`` byte-surgery with
+    :func:`inject_native_transition`; unlike that function it injects a
+    caller-supplied element and performs **no** cut-boundary or handle-media
+    checks — used for MotionVFX *named* transitions, whose 2-``MediaIn`` comp
+    cannot be rebuilt offline, so a real element is copied from a reference
+    timeline instead.
+
+    Parameters
+    ----------
+    data
+        A ``.drt`` / ``.drp`` file path or its raw bytes.
+    element_xml
+        A complete ``<Sm2TiTransition>…</Sm2TiTransition>`` element string.
+    track_index
+        Zero-based index into the video track vector to inject into.
+    member
+        SeqContainer member to edit (needed only for multi-timeline archives).
+    """
+    if not isinstance(element_xml, str) or "<Sm2TiTransition" not in element_xml:
+        raise DrtError("element_xml must be a <Sm2TiTransition> element string")
+    if (
+        not isinstance(track_index, int)
+        or isinstance(track_index, bool)
+        or track_index < 0
+    ):
+        raise DrtError("track_index must be a non-negative int")
+
+    buf = _drt._load_bytes(data)
+    try:
+        members = _drt._read_members(buf)
+    except zipfile.BadZipFile as e:
+        raise DrtError(f"not a valid .drt/.drp zip: {e}") from e
+
+    target = _resolve_member(members, member)
+    xml = members[target].decode("utf-8", errors="replace")
+
+    vec_m = _VIDEO_VEC_RE.search(xml)
+    if not vec_m:
+        raise DrtError("SeqContainer has no <VideoTrackVec>")
+    vec_offset = vec_m.start(1)
+    vec_inner = vec_m.group(1)
+
+    track_matches = list(_TRACK_RE.finditer(vec_inner))
+    if track_index >= len(track_matches):
+        raise DrtError(
+            f"video track_index {track_index} out of range "
+            f"(archive has {len(track_matches)} video track(s))"
+        )
+    tm = track_matches[track_index]
+    block = tm.group(0)
+    abs_start = vec_offset + tm.start()
+    abs_end = vec_offset + tm.end()
+
+    items_m = _ITEMS_RE.search(block)
+    if items_m is None or items_m.group(1) is None:
+        raise DrtError(
+            f"video track {track_index} has no populated <Items> clip list"
+        )
+    items_inner = items_m.group(1)
+    insert_at = items_m.end(1)  # just before the closing </Items>
+
+    element = element_xml.strip()
+    if "<Element>" in items_inner:
+        payload = f"\n     <Element>\n      {element}\n     </Element>"
+    else:
+        payload = f"\n  {element}"
+    new_block = block[:insert_at] + payload + block[insert_at:]
+    new_xml = xml[:abs_start] + new_block + xml[abs_end:]
+
+    members[target] = new_xml.encode("utf-8")
+    return _drt._write_members(members)
