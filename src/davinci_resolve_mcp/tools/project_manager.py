@@ -111,8 +111,10 @@ def save_project() -> str:
     """Save the currently open project."""
     try:
         conn = _conn()
+        pm = conn.get_project_manager()
         project = conn.get_project()
-        result = project.SaveProject()
+        # SaveProject() lives on the ProjectManager, not the Project object.
+        result = pm.SaveProject()
         if result:
             return f"Project '{project.GetName()}' saved successfully."
         return "Error: SaveProject reported failure — the project may not have been saved."
@@ -146,7 +148,8 @@ def close_project(save_before_close: bool = True) -> str:
         save_warning = ""
         if save_before_close:
             try:
-                if not project.SaveProject():
+                # SaveProject() lives on the ProjectManager, not the Project object.
+                if not pm.SaveProject():
                     save_warning = " (warning: SaveProject reported failure before close)"
             except Exception as save_exc:  # noqa: BLE001
                 save_warning = f" (warning: save before close failed: {save_exc})"
