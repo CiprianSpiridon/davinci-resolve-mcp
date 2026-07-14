@@ -31,9 +31,10 @@ htmlcov/
 .claude/*
 !.claude/skills/
 .claude/skills/*
-# Ship the symlink that mirrors this project's own skill into the Claude Code
-# skills dir (canonical source is the root-level davinci-resolve/ skill).
+# Ship the symlinks that mirror this project's own skills into the Claude Code
+# skills dir (canonical sources are the root-level davinci-resolve* skill dirs).
 !.claude/skills/davinci-resolve
+!.claude/skills/davinci-resolve-remove-silences-bad-takes-and-umms
 skills-lock.json
 
 # Workflow runtime status (keep .ulpi/plans/ tracked — it is a deliverable)
