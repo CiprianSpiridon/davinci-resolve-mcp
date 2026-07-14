@@ -96,6 +96,17 @@ gate, not a fixable failure.
 destructive, hard-to-undo action: **confirm with the user first**, and never call it as
 part of a cleanup/retry loop.
 
+## 10. Never live-introspect a Fusion comp's FULL graph — it hangs Resolve
+Enumerating every tool in a comp and walking each tool's inputs **hung Resolve** on heavy
+MotionVFX / template comps (verified). Don't do it. Read a template's controls **offline** from
+its `.setting` inside the `.drfx` — `get_template_controls(name)` returns the `macro_tool`, the
+published input **keys**, and resolved defaults with **no** Resolve running. Then set **specific
+inputs by key on the named macro tool**: `set_template_fields` (or `fusion_set_input`) resolves
+the ONE macro via `FindTool(macro_tool)` and calls `SetInput(key, value)`. Reading that single
+macro's inputs is fine; walking **every** tool is what hangs. The offline `.setting` is the source
+of truth for a template's controls + defaults and is stable regardless of the running server
+build — so there's no reason to pay the (Resolve-hanging) cost of full live graph introspection.
+
 ---
 
 ### General reminders that reinforce the above

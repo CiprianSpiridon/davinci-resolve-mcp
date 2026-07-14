@@ -91,7 +91,8 @@ Full recipe for each is in **[`reference/cookbook.md`](./reference/cookbook.md)*
   stills needing the panel visible, color-managed-only input color space, the no-transition-
   object hybrid, the `ofx.` prefix + `MediaOut1` splice, BezierSpline-first keyframing,
   read-only node graphs, Studio-18.5-gated cloud projects, `quit_resolve` terminating the
-  app. Skim it before driving those tools.
+  app, and **never live-walking a Fusion comp's full graph** (it hangs Resolve — read template
+  controls offline via `get_template_controls`, set by key). Skim it before driving those tools.
 
 ## Safety & judgement
 - **`execute_resolve_code` runs arbitrary Python** in Resolve (namespace: `resolve`,
