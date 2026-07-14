@@ -874,6 +874,45 @@ def _control_kind(source: str) -> str:
     return "other"
 
 
+def _node_body(txt: str, node: str, cache: Dict[str, str]) -> str:
+    """Brace-balanced body of a tool node's definition in the .setting (cached)."""
+    if node in cache:
+        return cache[node]
+    m = re.search(r"\b" + re.escape(node) + r"\s*=\s*\w+\s*\{", txt)
+    body = ""
+    if m:
+        i, depth = m.end() - 1, 0
+        for j in range(i, len(txt)):
+            if txt[j] == "{":
+                depth += 1
+            elif txt[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    body = txt[i + 1:j]
+                    break
+    cache[node] = body
+    return body
+
+
+def _node_input_value(body: str, source: str) -> str:
+    """Static default Value of ``source`` on a node (``Input { Value = … }`` or shorthand).
+
+    Returns "" when the input is driven/computed (no static default) — which is why ~1/3 of
+    controls correctly have no resolved default.
+    """
+    m = re.search(r"\b" + re.escape(source) + r"\s*=\s*Input\s*\{(.*?)\}", body, re.S)
+    if m:
+        v = re.search(r'Value\s*=\s*(?:"([^"]*)"|([^,\n}]+))', m.group(1))
+        if v:
+            return v.group(1) if v.group(1) is not None else v.group(2).strip()
+        return ""
+    m2 = re.search(r"\b" + re.escape(source) + r'\s*=\s*(?:"([^"]*)"|([^,\n{}]+))\s*,', body)
+    if m2:
+        val = m2.group(1) if m2.group(1) is not None else m2.group(2).strip()
+        return val if val != "Input" else ""
+    return ""
+
+
 def _parse_template_controls(txt: str) -> Dict[str, Any]:
     """Comprehensive, deduped control schema from a Fusion .setting's published InstanceInputs.
 
@@ -889,14 +928,21 @@ def _parse_template_controls(txt: str) -> Dict[str, Any]:
     text_fields: List[Dict[str, str]] = []
     order: List[Any] = []
     groups: Dict[Any, Dict[str, Any]] = {}
+    node_cache: Dict[str, str] = {}
     for key, body in blocks:
         source, node = _field(body, "Source"), _field(body, "SourceOp")
-        name, default = _field(body, "Name"), _field(body, "Default")
+        name = _field(body, "Name")
+        # Resolved default: the InstanceInput's own Default if present, else the node-level
+        # static input value (recovers text placeholders like "Cinematographer"; "" for a
+        # driven/computed input, so ~1/3 of controls correctly have no static default).
+        default = _field(body, "Default") or _node_input_value(
+            _node_body(txt, node, node_cache), source
+        )
         if node == "CustomLabels" or name.endswith("Controls"):
             continue  # section header, not a control
         kind = _control_kind(source)
         if kind == "text":
-            text_fields.append({"input": key, "node": node})
+            text_fields.append({"input": key, "node": node, "default": default})
         label = name or (f"Text ({node})" if kind == "text" else _KIND_LABEL.get(kind, source))
         gk = (node, label, kind)
         if gk not in groups:
