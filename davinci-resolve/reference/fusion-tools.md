@@ -313,14 +313,15 @@ There is no separate "add modifier" tool — BezierSpline is applied for you by
 `fusion_add_keyframe`; other modifier types (XYPath, Expression, Perturbation, …) require
 `execute_fusion_lua`.
 
-**Edit-page transform keyframes are different:** to keyframe an Inspector Transform/Crop/
-Composite property **directly on the timeline item** (not a Fusion input), use
-`add_transform_keyframe(property_name, frame, value, interpolation="")` /
-`get_transform_keyframes` / `delete_transform_keyframe`. Those keys need keyframe mode on
-first (`set_keyframe_mode` with mode 1 or 2) or they land as a static value. Valid
-properties: `Pan`, `Tilt`, `ZoomX`, `ZoomY`, `RotationAngle`, `AnchorPointX`,
-`AnchorPointY`, `CropLeft`, `CropRight`, `CropTop`, `CropBottom`, `Opacity`. Interpolation:
-`Linear`, `Bezier`, `EaseIn`, `EaseOut`, `EaseInOut`.
+**Edit-page transform keyframes are NOT scriptable (current builds):** `TimelineItem.AddKeyframe`
+does not exist on the tested build (Studio 21.0.2), so `add_transform_keyframe` is a **no-op** —
+it returns an `Error:` and points you at the Fusion path instead of creating a key. `set_keyframe_mode`
+does **not** enable it; that tool is the unrelated **Color-page** keyframe mode. So:
+- For an **animated** Edit-page push-in / Ken-Burns, use `animate_clip_transform` (it builds a
+  keyframed Fusion `.comp` on a video-only carrier — the only scriptable path; see §12 of
+  `operating-notes.md`).
+- For a **static** transform value, use `set_transform` / `set_cropping` / `set_composite`
+  directly on the timeline item (no keyframe needed).
 
 ---
 

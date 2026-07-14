@@ -150,9 +150,12 @@ the timeline's `.drt`, not by comp import.
   coerces numeric strings, so `"2"`/`"3"`/`"4"` also work).
 - **Dynamic Zoom** — only the **easing** is scriptable: `set_dynamic_zoom(ease, …)` →
   `DynamicZoomEase` (Linear/In/Out/InAndOut). The **enable flag and pre/post-crop rects are NOT
-  exposed**. For a scripted push-in / Ken-Burns, keyframe the transform instead:
-  `add_transform_keyframe("ZoomX"/"ZoomY"/"Pan"/"Tilt", frame, value, interpolation="EaseInOut")`
-  after `set_keyframe_mode(1)`. Do **not** rely on the Dynamic Zoom panel from script.
+  exposed**. For a scripted move: an **animated** push-in / Ken-Burns is done with
+  **`animate_clip_transform`** (a keyframed Fusion Transform on a video-only carrier+comp), a
+  **static** punch-in with **`set_transform`** on the clip. **Do not rely on
+  `add_transform_keyframe`** — it is a **no-op** on current Resolve builds (Edit-page transform
+  keyframes are unscriptable; `TimelineItem.AddKeyframe` doesn't exist). Do **not** rely on the
+  Dynamic Zoom panel from script.
 
 ## Guardrails
 - **Overlays NEVER on V1.** Titles/generators go on a carrier on an **upper** video track via
@@ -174,7 +177,8 @@ the timeline's `.drt`, not by comp import.
   proven; a live re-import + `export_current_frame` is the calibration.
 - `set_template_fields` drives the published macro controls; `set_title_text` covers only the primary
   Text+ field. Multi-field MotionVFX layouts: pass the full `fields` dict (or `fusion_set_input`).
-- **Smart Reframe** and **Dynamic Zoom framing** are apply-only / not introspectable (use
-  `add_transform_keyframe` for a scripted zoom). **Super Scale** needs an **int**.
+- **Smart Reframe** and **Dynamic Zoom framing** are apply-only / not introspectable (for a scripted
+  zoom use `animate_clip_transform` for an animated move or `set_transform` for a static one —
+  `add_transform_keyframe` is a no-op, see the motion note above). **Super Scale** needs an **int**.
 - A rare pack may register a different display name than its `.setting` basename — if resolution
   fails, confirm the name in the GUI Effects Library.

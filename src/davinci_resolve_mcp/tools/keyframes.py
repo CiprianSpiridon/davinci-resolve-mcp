@@ -2,14 +2,17 @@
 
 This module owns two distinct keyframe surfaces:
 
-1. *Edit-page transform keyframes* on a ``TimelineItem`` directly —
-   ``add_transform_keyframe`` / ``get_transform_keyframes`` /
-   ``delete_transform_keyframe`` drive the Inspector's Transform/Crop/Composite
-   properties (Pan, Tilt, ZoomX/Y, RotationAngle, AnchorPointX/Y,
-   CropLeft/Right/Top/Bottom, Opacity) via ``item.AddKeyframe`` /
-   ``item.DeleteKeyframe`` and read them back with ``GetKeyframeCount`` +
-   ``GetKeyframeAtIndex`` / ``GetPropertyAtKeyframeIndex``. Keyframe mode must be
-   enabled first (see ``set_keyframe_mode``) for the Edit-page keys to persist.
+1. *Edit-page transform keyframes* on a ``TimelineItem`` — ``get_transform_keyframes``
+   reads back the Inspector's Transform/Crop/Composite properties (Pan, Tilt,
+   ZoomX/Y, RotationAngle, AnchorPointX/Y, CropLeft/Right/Top/Bottom, Opacity) via
+   ``GetKeyframeCount`` + ``GetKeyframeAtIndex`` / ``GetPropertyAtKeyframeIndex``.
+   NOTE: this Resolve scripting API does NOT expose a usable
+   ``TimelineItem.AddKeyframe`` / ``DeleteKeyframe`` — Edit-page transform keys
+   cannot be *created* from scripting on the tested build (Studio 21.0.2), so
+   ``add_transform_keyframe`` fails gracefully and points at the Fusion path
+   (``animate_clip_transform``) for animated moves or ``set_transform`` for a
+   static value. ``set_keyframe_mode`` is the *Color* page keyframe mode and is
+   unrelated to these Edit-page transform properties.
 
 2. *Fusion input keyframes* (below): keyframing a Fusion tool input on a
    timeline item's composition.
@@ -39,16 +42,17 @@ string on failure), never raising out of the tool.
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Optional
 
 from ..app import mcp
 from ..helpers import _check_choice, _coerce_value, _get_timeline_item
 from .fusion import _get_fusion_comp, _resolve_tool
 
-# Edit-page transform properties that can be keyframed directly on a
-# ``TimelineItem`` (via ``AddKeyframe``/``DeleteKeyframe``). This is the
-# Inspector's Transform/Crop/Composite vocabulary — distinct from the Fusion
-# spline path above, which keys a Fusion tool input on the item's comp.
+# Edit-page transform properties — the Inspector's Transform/Crop/Composite
+# vocabulary, distinct from the Fusion spline path above (which keys a Fusion
+# tool input on the item's comp). These can be READ back
+# (``get_transform_keyframes``) but NOT created from scripting on this build:
+# ``TimelineItem.AddKeyframe``/``DeleteKeyframe`` are not exposed.
 TRANSFORM_KEYFRAME_PROPERTIES = (
     "Pan", "Tilt", "ZoomX", "ZoomY", "RotationAngle",
     "AnchorPointX", "AnchorPointY",
@@ -283,17 +287,24 @@ def add_transform_keyframe(
     track_index: int = 1,
     item_index: int = 0,
 ) -> str:
-    """Add an Edit-page transform keyframe on a timeline item.
+    """Attempt an Edit-page transform keyframe on a timeline item.
 
-    This keys an Inspector Transform/Crop/Composite property directly on the
-    ``TimelineItem`` (via ``item.AddKeyframe(property, frame, value)``) — NOT a
-    Fusion input. Keyframe mode must be enabled first (call ``set_keyframe_mode``
-    with mode 1 or 2) for the key to persist; otherwise the change is applied as
-    a static value.
+    IMPORTANT: this Resolve scripting API does NOT expose a usable
+    ``TimelineItem.AddKeyframe`` — Edit-page Inspector transform keyframes
+    (Pan/Tilt/Zoom/Crop/Opacity) are not scriptable on the tested build
+    (Studio 21.0.2), so this tool returns an ``Error:`` explaining that rather
+    than creating a key. ``set_keyframe_mode`` does NOT enable it — that is the
+    *Color* page keyframe mode and is unrelated to these properties.
+
+    For an ANIMATED move (Ken-Burns / push-in), use ``animate_clip_transform``,
+    which drives a keyframed Fusion Transform on a video-only carrier clip — the
+    only scriptable path to animated Edit-page-style motion. For a STATIC value,
+    use ``set_transform`` (or ``item.SetProperty("ZoomX"/"ZoomY", ...)``), which
+    works reliably.
 
     The string ``value`` is auto-coerced to int/float/bool where it looks
-    numeric/boolean (e.g. "1.0" -> 1, "0.5" -> 0.5). An optional ``interpolation``
-    is applied after the key is created via ``SetKeyframeInterpolation``.
+    numeric/boolean (e.g. "1.0" -> 1, "0.5" -> 0.5). ``interpolation`` is
+    validated but only applied if a key is created.
 
     Parameters:
     - property_name: one of "Pan", "Tilt", "ZoomX", "ZoomY", "RotationAngle",
@@ -323,20 +334,29 @@ def add_transform_keyframe(
                 return ierr
 
         item = _get_timeline_item(track_type, track_index, item_index)
-        if not hasattr(item, "AddKeyframe"):
-            return (
-                "Error: AddKeyframe is not available on this timeline item — "
-                "the installed Resolve API does not support Edit-page "
-                "transform keyframes."
-            )
 
         coerced = _coerce_value(value)
-        added = item.AddKeyframe(prop, frame, coerced)
+
+        # NOTE: Resolve PyRemoteObjects return True for hasattr(obj, ANYTHING),
+        # so a hasattr guard is useless — probe for a real callable instead.
+        add_kf = getattr(item, "AddKeyframe", None)
+        if not callable(add_kf):
+            return (
+                "Error: this Resolve build exposes no usable "
+                "TimelineItem.AddKeyframe — Edit-page transform keyframes are not "
+                "scriptable here. Use an animated Fusion Transform instead "
+                "(animate_clip_transform), or set a STATIC value with "
+                "set_transform."
+            )
+        try:
+            added = add_kf(prop, frame, coerced)
+        except TypeError:
+            added = None
         if not added:
             return (
-                f"Error: Failed to add keyframe on '{prop}' at frame {frame}. "
-                "Enable keyframe mode first (set_keyframe_mode), and ensure the "
-                "frame falls within the clip's timeline range."
+                "Error: could not add an Edit-page transform keyframe — not "
+                "supported by this API. Use a Fusion Transform "
+                "(animate_clip_transform) or a static set_transform."
             )
 
         interp_applied = None
@@ -437,7 +457,7 @@ def delete_transform_keyframe(
 
         item = _get_timeline_item(track_type, track_index, item_index)
         deleted = False
-        if hasattr(item, "DeleteKeyframe"):
+        if callable(getattr(item, "DeleteKeyframe", None)):
             try:
                 deleted = bool(item.DeleteKeyframe(prop, frame))
             except Exception:

@@ -132,6 +132,14 @@ def set_super_scale(clip_name: str, mode: int) -> str:
     returns ``True``), so ``mode`` is coerced to ``int`` before the call.
     Requires Resolve Studio (Super Scale is a Studio-only feature).
 
+    ⚠️ PERFORMANCE: Super Scale > 1 makes **renders extremely slow** — the Neural
+    Engine reprocesses every frame, and the cost scales with the pixel factor
+    (4x ≈ 16x the pixels, i.e. roughly 16x the per-frame work), turning a short
+    render into hours. For 1080p (or any delivery at or below the source
+    resolution) leave this at **1** — there is no visible gain from upscaling a
+    source you are downscaling anyway. Only set 2/3/4 when you genuinely need the
+    upscale (e.g. a low-res source delivered at a higher resolution).
+
     Parameters:
     - clip_name: name of the clip, as it appears in the current media pool
       folder.

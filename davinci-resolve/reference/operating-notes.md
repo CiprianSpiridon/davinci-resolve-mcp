@@ -63,7 +63,9 @@ included one). The new node is spliced into the clip's Fusion render chain **bet
 `MediaOut1`'s current upstream tool and `MediaOut1`** (new node's `Source` takes the old
 upstream, `MediaOut1`'s `Input` takes the new node) so the effect actually renders. If the
 clip's comp has **no `MediaOut1`**, the splice can't happen and the tool returns an error —
-create/attach a Fusion comp on the clip first.
+create/attach a Fusion comp on the clip first. Note you **cannot** attach one to a bare V1
+footage clip that has linked audio (`AddFusionComp` → `None`, `ImportFusionComp` → `False`) —
+that's the *"…(and one could not be created)"* error; run on a **video-only carrier** instead (§12).
 
 ## 6. Keyframing a **virgin** Fusion input needs a `BezierSpline` modifier first
 A plain `SetInput` on an un-animated Fusion input sets a **static** value — it will not
@@ -124,10 +126,13 @@ placement lane — read it, then dispatch. These are the invariants; don't regre
   clip's Color-page output — **black** for an alpha overlay — and lies. Titles are kinetic; sample a
   hold frame, not frame 0.
 - **Super Scale set needs an INT** (a string returns `False`). It's a MediaPoolItem property, so it
-  propagates to every timeline instance of that source.
+  propagates to every timeline instance of that source. **`set_super_scale` > 1 makes renders
+  extremely slow** (each frame runs the Neural Engine) — use **1** for 1080p delivery; higher gives
+  no visible gain there but can turn a short render into hours.
 - **Dynamic Zoom enable + framing rects are NOT scriptable** — only the easing (`DynamicZoomEase`).
-  For a scripted push-in / Ken-Burns use `add_transform_keyframe` (ZoomX/ZoomY/Pan/Tilt, after
-  `set_keyframe_mode(1)`).
+  For a scripted push-in / Ken-Burns **do not** use `add_transform_keyframe` — it's a no-op
+  (Edit-page transform keyframes are unscriptable, §12): use `animate_clip_transform` (carrier+comp)
+  for an **animated** move, or `set_transform` for a **static** one.
 - **`Insert*` targets V1 and can't be redirected** — overlays go on an upper track via
   `AppendToTimeline(trackIndex>=2, mediaType:1)`, and its `endFrame` is **EXCLUSIVE**. Locking V1
   makes an insert **fail**, it does not redirect.
@@ -136,6 +141,27 @@ placement lane — read it, then dispatch. These are the invariants; don't regre
   and handle the falsy/`None` result.
 - **Don't walk the full Fusion graph live** (see §10) — `GetToolList` per clip in small batches,
   classify, export only the few you need.
+
+## 12. Edit-page transform keyframes are **NOT scriptable** — animate via a Fusion carrier
+- **`TimelineItem.AddKeyframe` does not exist** on this scripting API, so Edit-page Inspector
+  transform keyframes (Pan/Tilt/Zoom/Crop/Opacity) can't be set from script. The old
+  `hasattr(item,"AddKeyframe")` guard is **useless** — Resolve proxies return `True` for
+  `hasattr(obj, ANYTHING)` (§11), so it passes and then `None(...)` raises `'NoneType' object is not
+  callable`. **`add_transform_keyframe` is a no-op** on current builds (verified Studio 21.0.2), and
+  `set_keyframe_mode` is the unrelated **Color-page** mode — don't rely on either for an Edit-page move.
+- **STATIC punch-in** — the value setters work **directly on the footage clip**: `set_transform` /
+  `item.SetProperty("ZoomX"/"ZoomY", <float>)`. No carrier, cheap; use when no motion is wanted.
+- **You can't attach a Fusion comp/effect directly to a bare V1 footage clip.** `AddFusionComp`
+  **returns `None`** on a base footage clip and `ImportFusionComp` **fails (`False`)** on a base clip
+  **with linked audio** — so a comp can't be created there. This is exactly why `apply_ofx_to_clip`
+  errors *"…(and one could not be created)"* on a plain V1 clip (§5). Work on a **video-only carrier**
+  (`AppendToTimeline([{…, mediaType:1}])`) instead.
+- **ANIMATED Ken-Burns IS scriptable** (frame-verified — RETRACT any "GUI-only" claim): build a
+  `Composition { MediaIn1 → Transform1 → MediaOut1 }` `.comp` with `Transform1.Size` driven by a
+  keyframed `BezierSpline`, place a **video-only carrier** of the **same source range** on an upper
+  track, then `carrier.ImportFusionComp(comp)` — Resolve rebinds `MediaIn1` to the carrier's footage
+  and the keyframed Transform zooms the real frames. That's `animate_clip_transform`; it is the **only**
+  scriptable path to an animated move / motivated push-in.
 
 ---
 

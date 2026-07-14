@@ -68,6 +68,7 @@ from ..helpers import (
     _ok,
     _require_timeline,
 )
+from ..formats.kenburns import build_kenburns_comp
 from .fusion import _get_fusion_comp, _resolve_tool, _set_tool_input
 from .media_pool import _media_pool
 
@@ -1344,6 +1345,17 @@ def cache_template_comp(name: str, pack: str = "") -> str:
         project = conn.get_project()
         media_pool = _media_pool()
 
+        # Capture the caller's current timeline BEFORE creating the scratch:
+        # _get_or_create_scratch_timeline ends in CreateEmptyTimeline, which makes
+        # the NEW (scratch) timeline current, so capturing afterwards on a first-ever
+        # call records the scratch ITSELF and the finally-restore becomes a no-op that
+        # strands the caller on the 1-track scratch (breaking place_overlay_title).
+        prev_timeline = None
+        try:
+            prev_timeline = project.GetCurrentTimeline()
+        except Exception:  # noqa: BLE001
+            prev_timeline = None
+
         scratch_name = "_mcp_comp_cache (scratch)"
         scratch = _get_or_create_scratch_timeline(project, media_pool, scratch_name)
         if scratch is None:
@@ -1351,12 +1363,6 @@ def cache_template_comp(name: str, pack: str = "") -> str:
                 f"Error: could not create the scratch timeline '{scratch_name}' "
                 f"for the one-time comp capture."
             )
-
-        prev_timeline = None
-        try:
-            prev_timeline = project.GetCurrentTimeline()
-        except Exception:  # noqa: BLE001
-            prev_timeline = None
 
         exported = False
         try:
@@ -1448,6 +1454,17 @@ def place_overlay_title(
         if duration_frames < 4:
             return f"Error: duration_frames must be >= 4 (got {duration_frames})."
 
+        # place_overlay_title has no timeline arg — it operates on whatever is
+        # current. Capture the caller's timeline up front so we can re-assert it
+        # after cache_template_comp (which switches to a scratch timeline to do
+        # its one-time capture) and guarantee the carrier lands on the caller's
+        # timeline even if caching left current elsewhere. Best-effort; never raise.
+        cur = None
+        try:
+            cur = _conn().get_project().GetCurrentTimeline()
+        except Exception:  # noqa: BLE001
+            cur = None
+
         cache_result = cache_template_comp(name, pack)
         if cache_result.startswith("Error"):
             return cache_result
@@ -1458,6 +1475,14 @@ def place_overlay_title(
                 f"Error: could not obtain a cached comp path for '{name}': "
                 f"{cache_result}"
             )
+
+        # Re-assert the caller's timeline before appending the carrier, so the
+        # carrier can never land on the comp-cache scratch timeline.
+        if cur is not None:
+            try:
+                _conn().get_project().SetCurrentTimeline(cur)
+            except Exception:  # noqa: BLE001
+                pass
 
         if carrier_clip and carrier_clip.strip():
             clip = _find_media_pool_item(carrier_clip.strip())
@@ -1530,6 +1555,207 @@ def place_overlay_title(
                 "verify_hint": (
                     "export_current_frame at a hold frame (titles are kinetic — "
                     "mid-sweep frames may look empty)."
+                ),
+            },
+            indent=2,
+            default=str,
+        )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def animate_clip_transform(
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+    zoom_from: float = 1.0,
+    zoom_to: float = 1.08,
+    center_from: str = "0.5,0.5",
+    center_to: str = "0.5,0.5",
+    carrier_track: int = 0,
+) -> str:
+    """Animate a Ken-Burns / motivated push-in on a clip (the ONLY scriptable path).
+
+    Two Resolve API walls block the "obvious" route: ``TimelineItem.AddKeyframe`` does
+    not exist, and ``AddFusionComp``/``ImportFusionComp`` FAIL on a base footage clip
+    with linked audio — so animated transform keyframes cannot be attached to the
+    footage clip itself. The bypass: build a keyframed ``.comp`` whose keyframes live
+    INSIDE the file (:func:`build_kenburns_comp`), place a VIDEO-ONLY carrier of the
+    same source range on an upper track, and import the comp onto the carrier. Resolve
+    rebinds ``MediaIn1`` to the carrier's footage, so the keyframed ``Transform`` zooms
+    the real frames while the base clip's audio is untouched (``mediaType:1``).
+
+    This adds ONE extra video layer per animated clip. When no MOTION is wanted, a
+    STATIC punch-in is cheaper: :func:`set_transform` / ``SetProperty("ZoomX"/"ZoomY")``
+    directly on the clip needs no carrier.
+
+    Parameters:
+    - track_type/track_index/item_index: locate the target clip to animate.
+    - zoom_from/zoom_to: Transform ``Size`` at start/end (1.0 = none; 1.08 = +8%).
+    - center_from/center_to: ``"cx,cy"`` (0..1) pan endpoints (0.5,0.5 = centre).
+    - carrier_track: 1-based video track for the carrier; 0 = auto-pick the first free
+      upper video track above the clip (adding one if needed). NEVER the clip's own track.
+
+    Returns JSON ``{success, carrier_track, carrier_item_index, zoom_from, zoom_to,
+    verify_hint}`` or an ``Error: ...`` string.
+    """
+    try:
+        def _parse_center(s: str, label: str):
+            parts = str(s).split(",")
+            if len(parts) != 2:
+                raise RuntimeError(
+                    f"{label} must be 'cx,cy' (two floats), got {s!r}."
+                )
+            return float(parts[0].strip()), float(parts[1].strip())
+
+        cx_from, cy_from = _parse_center(center_from, "center_from")
+        cx_to, cy_to = _parse_center(center_to, "center_to")
+
+        item = _get_timeline_item(track_type, track_index, item_index)
+        if item is None:
+            return (
+                f"Error: no timeline item at {track_type} track {track_index} "
+                f"index {item_index}."
+            )
+
+        # Source range + timeline placement of the target clip.
+        try:
+            src = int(item.GetLeftOffset())
+        except Exception:  # noqa: BLE001
+            src = 0
+        try:
+            start = int(item.GetStart())
+        except Exception:  # noqa: BLE001
+            start = 0
+        try:
+            dur = int(item.GetDuration())
+        except Exception:  # noqa: BLE001
+            dur = 0
+        if dur <= 0:
+            try:
+                dur = int(item.GetEnd()) - start
+            except Exception:  # noqa: BLE001
+                dur = 0
+        if dur < 4:
+            return (
+                f"Error: target clip duration {dur} frame(s) is too short to "
+                f"animate (need >= 4)."
+            )
+
+        # The carrier MUST show the SAME frames as the target clip, so use the
+        # target's OWN Media Pool source.
+        carrier_source = None
+        get_mpi = getattr(item, "GetMediaPoolItem", None)
+        if callable(get_mpi):
+            try:
+                carrier_source = get_mpi()
+            except Exception:  # noqa: BLE001
+                carrier_source = None
+        if carrier_source is None:
+            return (
+                "Error: could not get the target clip's Media Pool item "
+                "(GetMediaPoolItem unavailable) — cannot build a matching carrier."
+            )
+
+        # Build the keyframed comp text and write it to the comp-cache dir.
+        comp_text = build_kenburns_comp(
+            dur, zoom_from, zoom_to, cx_from, cy_from, cx_to, cy_to
+        )
+        comp_name = (
+            f"kenburns-t{track_index}-i{item_index}-s{start}-"
+            f"{zoom_from}-{zoom_to}"
+        )
+        comp_path = os.path.join(
+            _comp_cache_dir(),
+            re.sub(r"[^A-Za-z0-9._-]", "_", comp_name) + ".comp",
+        )
+        with open(comp_path, "w", encoding="utf-8") as fh:
+            fh.write(comp_text)
+
+        conn = _conn()
+        timeline = _require_timeline(conn)
+        try:
+            vtracks = int(timeline.GetTrackCount("video") or 0)
+        except Exception:  # noqa: BLE001
+            vtracks = 0
+
+        def _upper_track_free(track_no: int) -> bool:
+            """True if no item on video ``track_no`` overlaps [start, start+dur)."""
+            try:
+                items = timeline.GetItemListInTrack("video", track_no) or []
+            except Exception:  # noqa: BLE001
+                return False
+            end = start + dur
+            for it in items:
+                try:
+                    if int(it.GetStart()) < end and int(it.GetEnd()) > start:
+                        return False
+                except Exception:  # noqa: BLE001
+                    return False
+            return True
+
+        # Determine the carrier track. Must be an UPPER track above the clip.
+        if carrier_track >= 1:
+            target_track = int(carrier_track)
+            if target_track <= track_index:
+                return (
+                    f"Error: carrier_track {carrier_track} must be an UPPER video "
+                    f"track ABOVE the clip's own track ({track_index}); a same or "
+                    f"lower track would be occluded by the clip."
+                )
+            while vtracks < target_track:
+                if not timeline.AddTrack("video"):
+                    return (
+                        f"Error: could not add video tracks up to carrier_track "
+                        f"{target_track} (timeline has {vtracks})."
+                    )
+                vtracks += 1
+        else:
+            # Auto-pick the first FREE upper video track above the clip's track;
+            # if none of the existing upper tracks is free, add a fresh one on top.
+            target_track = 0
+            for t in range(track_index + 1, vtracks + 1):
+                if _upper_track_free(t):
+                    target_track = t
+                    break
+            if target_track == 0:
+                if not timeline.AddTrack("video"):
+                    return (
+                        f"Error: could not add an upper video track for the carrier "
+                        f"(timeline has {vtracks})."
+                    )
+                vtracks += 1
+                target_track = vtracks
+
+        # Place a video-only carrier of the SAME source range on the carrier track.
+        carrier = _append_video_carrier(
+            carrier_source, src, src + dur, target_track, start,
+            label=f"kenburns carrier (item {item_index})",
+        )
+        carrier_item_index = _item_index_on_track("video", target_track, carrier)
+        if carrier_item_index < 0:
+            return (
+                f"Error: placed the carrier but could not locate it on video "
+                f"track {target_track} to import the comp."
+            )
+
+        attach_result = attach_fusion_comp(
+            "video", target_track, carrier_item_index, comp_path
+        )
+        if attach_result.startswith("Error"):
+            return attach_result
+
+        return json.dumps(
+            {
+                "success": True,
+                "carrier_track": target_track,
+                "carrier_item_index": carrier_item_index,
+                "zoom_from": zoom_from,
+                "zoom_to": zoom_to,
+                "verify_hint": (
+                    "export_current_frame at start vs end — footage should zoom "
+                    f"{zoom_from}->{zoom_to}"
                 ),
             },
             indent=2,

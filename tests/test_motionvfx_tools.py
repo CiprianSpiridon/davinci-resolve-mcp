@@ -47,6 +47,8 @@ NEW_TOOL_NAMES = frozenset(
     }
 )
 
+_PROVEN_COMP = os.path.join(_FIXTURES_DIR, "kenburns-animated-zoom_PROVEN.comp")
+
 
 # ---------------------------------------------------------------------------
 # (a) registration
@@ -198,3 +200,76 @@ def test_place_motionvfx_transition_missing_library(tmp_path, monkeypatch):
     assert isinstance(result, str)
     assert result.startswith("Error")
     assert "library" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# (d) Ken-Burns / animated-zoom .comp generator + animate_clip_transform tool
+# ---------------------------------------------------------------------------
+
+
+def test_build_kenburns_comp_no_pan():
+    """No-pan (center from==to): keyframe only Size, emit a static Center, no PolyPath."""
+    from davinci_resolve_mcp.formats.kenburns import build_kenburns_comp
+
+    dur = 90
+    comp = build_kenburns_comp(
+        dur_frames=dur,
+        zoom_from=1.0,
+        zoom_to=1.08,
+        cx_from=0.5,
+        cy_from=0.5,
+        cx_to=0.5,
+        cy_to=0.5,
+    )
+    assert isinstance(comp, str)
+    assert comp.startswith("Composition {")
+    # Top-level tool graph MediaIn1 -> Transform1 -> MediaOut1 with a Size spline.
+    assert "MediaIn1 = MediaIn" in comp
+    assert "Transform1 = Transform" in comp
+    assert "MediaOut1 = MediaOut" in comp
+    assert "Transform1Size = BezierSpline" in comp
+    # The [0] key carries zoom_from and the [dur-1] key carries zoom_to.
+    assert f"[0] = {{ {1.0}" in comp
+    assert f"[{dur - 1}] = {{ {1.08}" in comp
+    # Static center means no PolyPath center animation.
+    assert "PolyPath" not in comp
+
+
+def test_build_kenburns_comp_with_pan():
+    """Pan (center from != to): emit a Transform1CenterPath PolyPath with both X values."""
+    from davinci_resolve_mcp.formats.kenburns import build_kenburns_comp
+
+    comp = build_kenburns_comp(
+        dur_frames=90,
+        zoom_from=1.0,
+        zoom_to=1.08,
+        cx_from=0.3,
+        cy_from=0.5,
+        cx_to=0.7,
+        cy_to=0.5,
+    )
+    assert "Transform1CenterPath = PolyPath" in comp
+    assert "X = 0.3" in comp
+    assert "X = 0.7" in comp
+
+
+def test_animate_clip_transform_registered(tool_names):
+    assert "animate_clip_transform" in tool_names
+    assert tool_names.count("animate_clip_transform") == 1
+
+
+@pytest.mark.skipif(
+    not os.path.isfile(_PROVEN_COMP),
+    reason="kenburns PROVEN fixture absent (gitignored; not present in CI)",
+)
+def test_build_kenburns_comp_matches_proven_toolset():
+    """Generated comp exposes the same top-level tools as the live-proven comp."""
+    from davinci_resolve_mcp.formats.kenburns import build_kenburns_comp
+
+    with open(_PROVEN_COMP, encoding="utf-8", errors="replace") as fh:
+        proven = fh.read()
+    generated = build_kenburns_comp(dur_frames=1745, zoom_from=1.0, zoom_to=1.1)
+
+    for tool in ("MediaIn1 = MediaIn", "Transform1 = Transform", "MediaOut1 = MediaOut"):
+        assert tool in proven, f"proven fixture missing {tool!r}"
+        assert tool in generated, f"generated comp missing {tool!r}"
