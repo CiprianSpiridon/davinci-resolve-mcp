@@ -41,3 +41,11 @@ skills-lock.json
 
 # Workflow runtime status (keep .ulpi/plans/ tracked — it is a deliverable)
 .ulpi/workflows/
+
+# Machine-specific generated plugin TOC + control dumps (davinci-resolve-generate-plugin-list
+# output — reflects THIS machine's installed packs; regenerate per machine, don't ship).
+davinci-plugins.json
+davinci-plugins.md
+davinci-plugin-controls.json
+davinci-plugin-controls.md
+CLAUDE.md

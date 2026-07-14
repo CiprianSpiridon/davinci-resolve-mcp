@@ -19,10 +19,11 @@ argument-hint: "[e.g. 'add a vignette to clip 3' | 'drop an intro title' | 'appl
 # Use plugins, effects & template packs (DaVinci Resolve)
 
 > **Claude: you CAN use these.** Every plugin/effect/template in the TOC
-> (`davinci-plugins.md`) is usable right now — titles, generators, effects, and ResolveFX via
-> scripting; transitions best-effort/GUI. Don't tell the user they're "GUI-only" or that you can't
-> use their MotionVFX packs. When asked to use one: (1) find it in the TOC, (2) read its **lane**
-> below, (3) run that lane's tool. Do this before saying anything is impossible.
+> (`davinci-plugins.md`) is usable right now — titles, generators, effects, ResolveFX, **and
+> transitions** (overlay ones on an upper track; even 2-input ones via a Fusion comp) — all via
+> scripting. Don't tell the user anything is "GUI-only" or that you can't use their MotionVFX packs.
+> When asked to use one: (1) find it in the TOC, (2) read its **lane** below, (3) run that lane's
+> tool. Do this before saying anything is impossible.
 
 **Short answer: nearly all of them are usable via scripting.** The five categories in the TOC map
 to four scripting lanes (plus one honest asterisk). Pick the right lane — mixing them up is the #1
@@ -34,7 +35,7 @@ cause of "nothing happened":
 | **Generators** | insert as its own clip | ✅ `insert_template_by_name(kind="fusion_generator", name)` |
 | **Effects** (MotionVFX Fusion effects) | apply onto an existing clip | ✅ extract the `.setting` from the `.drfx`, then `apply_macro_to_clip(setting_path=…)` |
 | **ResolveFX / OFX** (built-in) | apply onto an existing clip | ✅ `apply_ofx_to_clip(regid)` |
-| **Transitions** (MotionVFX) | span a cut | ⚠️ **no transition-at-cut API** — best-effort (apply as a comp over the cut) or GUI |
+| **Transitions** (MotionVFX) | overlay the cut / span two clips | ✅ **overlay (~2/3): easy** — upper track or `apply_macro_to_clip`. ✅ **2-input (~1/3): Fusion-comp route** — `create_fusion_clip([A,B])` → wire both `MediaIn`s to `MainInput1/2` (verify live). Classify via `get_template_controls().two_input_transition` |
 
 This is a focused composition over the base **`davinci-resolve`** MCP skill (see its
 `cookbook.md` / `fusion-tools.md`).
@@ -92,25 +93,36 @@ track_type="video", track_index=1, item_index=0)`
 - Upbeat-look picks (with TOC descriptions): `vignette`, `glow`, `filmlook`, `lightray`, `sharpen`,
   `gaussianblur` (blur-in), `zoomblur` (punch energy), `dehaze`, `beauty`.
 
-## Lane 5 — Transitions (the one genuine GUI-only case)
-A MotionVFX transition `.setting` is a Fusion **`MacroOperator` with TWO inputs**
-(`MainInput1`/`MainInput2`) — an edit-point transition that Resolve auto-wires to the two adjacent
-clips at a cut. So:
-- The Effects macro-lane does **not** apply (that's single-input; a transition needs both clips).
-- There is **no scripting call** to place a Fusion transition at a cut or wire its two inputs
-  (verified: official API has none; repo `operating-notes.md #4`; `hasattr` on live objects is a
-  false positive — it returns True for any name). Do custom transitions in the **GUI**.
-- **Scriptable transitions = built-in dissolves only.** Live: `add_default_transition_at_cut(...)`
-  (Cmd+T keystroke). Offline: `place_transition` / `author_transition_interchange` byte-author a
-  `.drt`/`.drp` — but they support only a fixed SMPTE-dissolve list (`cross-dissolve`, `dissolve`,
-  `additive-dissolve`, `film-dissolve`, `dip-to-color`) and come back **`"verified": false`**
-  (needs a live import to confirm). They have **no** primitive for a custom **Fusion/MotionVFX**
-  transition (that's a Fusion-transition element referencing the macro — undocumented, version-
-  specific serialization). Hand-writing it into the `.drt` bytes is theoretically possible but
-  unsupported, fragile, and unverified — treat as GUI-only.
-- **Practical upbeat alternatives that ARE reliably scriptable:** a built-in dissolve at section
-  breaks; or hard cut + a title/generator "whoosh" overlay on an upper track; or a
-  `zoomblur`/`gaussianblur` blur-in on the incoming clip via `apply_ofx_to_clip`.
+## Lane 5 — Transitions: CLASSIFY FIRST (most MotionVFX transitions ARE scriptable)
+**Do NOT assume "transitions = GUI-only" — check the arity.** `get_template_controls(name)`
+returns **`two_input_transition`** (from the `.setting`'s `MainInput` count). Verified across all
+44 MotionVFX transitions: **30 are single-input overlays, 14 are true 2-input** (the flag matches
+the extracted control data exactly). Never default to a plain dissolve when the user owns these.
+
+> **Honesty:** the CLASSIFICATION above is verified from the `.setting` data. The placement/wiring
+> steps below are the correct *mechanism* but are **not yet run end-to-end against live Resolve** —
+> execute them, then **confirm with `screenshot`**; never report success blind.
+
+- **`two_input_transition: false` → OVERLAY (single-input) — SCRIPTABLE.** Zoom / spin / flash /
+  glitch / light-leak (e.g. `mTuber 4 Zoom`, `mTuber 4 Spin Zoom Out`, `mTuber 4 Flash`,
+  `mKeynote Transition 01–08`, `mTuber 3 Transition 01–08`). They composite *over* the cut, not
+  between two clips. Apply either way:
+  - **Overlay on an upper track spanning the cut:** playhead to `cut - duration/2`
+    (`set_current_timecode`), then `insert_template_by_name(kind="fusion_title", name=…)` on a
+    video track ABOVE the clips, sized to `duration` centred on the cut.
+  - **Or onto the incoming clip:** extract its `.setting` from the `.drfx` (see Lane 3) and
+    `apply_macro_to_clip(setting_path=…, item_index=<incoming clip>)` — single-input = one clip.
+- **`two_input_transition: true` → STILL scriptable, via a Fusion comp (harder, verify live).**
+  ~1/3 (e.g. `mTuber 4 Swoosh`, `mAntique Film Roll`, `mKeynote 2 Color Wipe`, Prism Fade) need
+  BOTH clips fed to `MainInput1`/`MainInput2`. There's no *edit-page* `InsertTransition` API — but
+  you can build it in **Fusion**: `create_fusion_clip([clipA, clipB])` yields a comp with two
+  `MediaIn`s; import the transition `.setting` as a tool (Lane 3 extract → `add_fusion_tool` /
+  `apply_macro_to_clip`), then `fusion_connect_input` MediaIn1→`MainInput1`, MediaIn2→`MainInput2`,
+  macro→`MediaOut1`. Don't tell the user it "can't be done" — it's more involved, not impossible.
+- **Built-in dissolves** are the always-scriptable fallback: `add_default_transition_at_cut(...)`
+  (live, Cmd+T) or offline `place_transition` / `author_transition_interchange` (`.drt`/`.drp`,
+  fixed SMPTE list, `"verified": false`). Use these only when no overlay fits — reach for the
+  MotionVFX overlay transitions above first.
 
 ## Guardrails
 - **Match the lane** (table). Trying to `insert_template_by_name` an Effect, or `apply_ofx_to_clip`

@@ -949,7 +949,12 @@ def _parse_template_controls(txt: str) -> Dict[str, Any]:
             groups[gk] = {"name": label, "node": node, "kind": kind, "keys": [], "default": default}
             order.append(gk)
         groups[gk]["keys"].append(key)
+    # main_inputs = count of published MainInput image inputs. NOT unique to transitions:
+    # titles/effects can also expose 2 image inputs, so the "2-input transition" verdict must be
+    # gated on the template's CATEGORY (done in get_template_controls, which knows the path).
+    main_inputs = len(re.findall(r"MainInput\d*\s*=\s*InstanceInput", txt))
     return {"macro_tool": macro_tool, "n_controls": len(blocks),
+            "main_inputs": main_inputs,
             "text_fields": text_fields, "options": [groups[gk] for gk in order]}
 
 
@@ -995,6 +1000,11 @@ def get_template_controls(name: str, pack: str = "", scope: str = "all") -> str:
         their R/G/B/A into one entry's keys; kinds: text/color/scale/position/rotation/opacity/font/
         style/value/other. Set any via fusion_set_input(macro_tool, <key>, value) on the placed item
         (or set several at once with set_template_fields).
+      - main_inputs / two_input_transition: the count of published MainInput image inputs. For a
+        TRANSITION, two (two_input_transition=true) means a true edit-point transition Resolve
+        auto-wires to both adjacent clips at a cut — GUI-only, no scripting API. Fewer than two
+        means a single-input OVERLAY transition (whoosh/zoom/glitch) — scriptable: drop it on an
+        upper track spanning the cut, or apply_macro_to_clip onto the incoming clip.
 
     Parameters:
     - name: template insert name as from enumerate_templates (e.g. "mTuber 4 Lower 01").
@@ -1010,7 +1020,16 @@ def get_template_controls(name: str, pack: str = "", scope: str = "all") -> str:
             return (f"Error: template {name!r} not found in {canonical} templates. Use "
                     "enumerate_templates() for exact names (and pack= to disambiguate).")
         data = _parse_template_controls(txt)
+        # A "2-input transition" (auto-wired to both clips at a cut -> GUI-only) is ONLY a real
+        # verdict inside the Transitions category: titles/effects also expose 2 image inputs, so
+        # gate the flag on category (derived from the member path). category != Transitions, or
+        # main_inputs < 2 -> single-input OVERLAY (scriptable: place on an upper track / macro).
+        category = _template_category(member.replace(os.sep, "/").split("/"))
+        two_input_transition = (
+            category.lower() == "transitions" and data.get("main_inputs", 0) >= 2
+        )
         return json.dumps({"success": True, "name": name, "pack": found_pack, "member": member,
+                           "category": category, "two_input_transition": two_input_transition,
                            **data}, indent=2, ensure_ascii=False)
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
