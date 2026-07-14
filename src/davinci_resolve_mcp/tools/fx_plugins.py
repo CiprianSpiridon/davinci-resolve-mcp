@@ -55,6 +55,7 @@ import json
 import os
 import re
 import sys
+import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..app import mcp
@@ -624,6 +625,37 @@ def _template_category(rel_parts: List[str]) -> str:
     return ""
 
 
+def _drfx_templates(drfx_path: str) -> List[Tuple[str, str]]:
+    """Expand a ``.drfx`` package into the templates it contains.
+
+    A ``.drfx`` is a ZIP archive whose real, insertable templates live inside as
+    ``Edit/<Category>/.../<name>.setting`` entries (a single pack commonly holds
+    dozens across Titles/Transitions/Effects/Generators). The pack's category is
+    NOT derivable from where the ``.drfx`` file sits on disk — it must be read
+    from inside the archive. Returns ``(insert_name, category)`` pairs; an
+    unreadable/oddly-structured archive yields ``[]`` (caller falls back).
+    """
+    out: List[Tuple[str, str]] = []
+    try:
+        with zipfile.ZipFile(drfx_path) as zf:
+            for entry in zf.namelist():
+                if "__MACOSX" in entry or not entry.lower().endswith(".setting"):
+                    continue
+                parts = entry.split("/")
+                lowered = [p.lower() for p in parts]
+                category = ""
+                if "edit" in lowered:
+                    idx = lowered.index("edit")
+                    if idx + 1 < len(parts):
+                        category = parts[idx + 1]
+                insert_name = os.path.basename(entry)[: -len(".setting")]
+                if insert_name:
+                    out.append((insert_name, category))
+    except (zipfile.BadZipFile, OSError, RuntimeError):
+        return []
+    return out
+
+
 def _registry_json_path() -> str:
 
     Resolved via a PACKAGE-RELATIVE path so it works when the package is
@@ -641,21 +673,27 @@ def _registry_json_path() -> str:
 
 
 @mcp.tool()
-def enumerate_templates(scope: str = "all") -> str:
+def enumerate_templates(scope: str = "all", expand_drfx: bool = True) -> str:
     """List Fusion Edit templates (titles/generators/etc.) on this machine.
 
     Filesystem scan ONLY — no running Resolve required. Walks the
-    ``Fusion/Templates`` tree(s) for the requested ``scope`` and reports every
-    ``.setting`` / ``.drfx`` template found, with the ``Insert*`` name (the file
-    basename minus its extension — the value you pass to
-    :func:`insert_template_by_name`) and its category. Titles and Generators are
-    flagged ``insertable: true`` (they can be dropped with a Timeline Insert*
-    call); other categories are reported for discovery but flagged
-    ``insertable: false``.
+    ``Fusion/Templates`` tree(s) for the requested ``scope``. Loose ``.setting``
+    templates are reported directly. A ``.drfx`` is a ZIP PACK (e.g. a purchased
+    MotionVFX pack) that holds many templates across Titles/Transitions/Effects;
+    with ``expand_drfx`` (default) it is opened and each internal template is
+    reported with its true, in-archive category and an ``Insert*`` name (the
+    value you pass to :func:`insert_template_by_name`). Titles and Generators are
+    flagged ``insertable: true`` (droppable via a Timeline Insert* call);
+    other categories are reported for discovery, ``insertable: false``. Each
+    expanded row also carries the source ``pack`` filename.
 
     Parameters:
     - scope: "all" (default), "shipped" (system install), or "user"
       (per-user templates).
+    - expand_drfx: when True (default), expand each ``.drfx`` pack into its
+      internal templates. When False, report one row per ``.drfx`` file (its
+      category comes from the on-disk path, so it may be empty for a top-level
+      pack).
 
     Returns a JSON object with a ``templates`` list. A scanned directory that
     does not exist contributes nothing (NOT an error), so a machine with no
@@ -683,12 +721,38 @@ def enumerate_templates(scope: str = "all") -> str:
                     full = os.path.join(dirpath, fname)
                     rel = os.path.relpath(full, root)
                     rel_parts = rel.split(os.sep)
+                    # A .drfx is a ZIP PACK, not a single template: expand it
+                    # into the templates it carries, each with its true category
+                    # read from INSIDE the archive (a top-level .drfx has no
+                    # on-disk category, which is why packs used to come back
+                    # category="" / insertable=false).
+                    if ext == ".drfx" and expand_drfx:
+                        contents = _drfx_templates(full)
+                        if contents:
+                            for insert_name, category in contents:
+                                templates.append(
+                                    {
+                                        "name": insert_name,
+                                        "insert_name": insert_name,
+                                        "category": category,
+                                        "type": "drfx",
+                                        "scope": scope_label,
+                                        "insertable": category.lower()
+                                        in _INSERTABLE_TEMPLATE_CATEGORIES,
+                                        "pack": fname,
+                                        "path": full,
+                                    }
+                                )
+                            continue
+                        # Unreadable/empty archive: fall through to a summary row.
+
                     category = _template_category(rel_parts)
                     insert_name = fname[: -len(ext)]
-                    insertable = (
-                        ext == ".setting"
-                        and category.lower() in _INSERTABLE_TEMPLATE_CATEGORIES
-                    )
+                    # Insertability is decided by CATEGORY (Titles/Generators can
+                    # be dropped via a Timeline Insert* call), independent of the
+                    # file extension — a .setting OR a .drfx-internal template both
+                    # qualify.
+                    insertable = category.lower() in _INSERTABLE_TEMPLATE_CATEGORIES
                     templates.append(
                         {
                             "name": insert_name,
