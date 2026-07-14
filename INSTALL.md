@@ -223,22 +223,37 @@ its placeholder path with the real absolute `SERVER` path.
 path, the JSON is valid (`python3 -m json.tool <file>` succeeds), and — for Claude
 Code — `claude mcp list` shows it. Confirm the human restarted the client app.
 
-### 5d — install the bundled agent skill GLOBALLY (Claude Code + Cowork)
+### 5d — install the bundled agent skills GLOBALLY (Claude Code + Cowork)
 
-This repo ships an agent skill (canonical source: root-level `davinci-resolve/`, symlinked
-into `.claude/skills/`) that teaches the agent how to set up **and** operate the MCP. It
-auto-loads when Claude Code runs **inside this repo**, but to make it available everywhere
-— **Claude Code and Claude Cowork both read `~/.claude/skills/`** — install it **globally**
-for all agents:
+This repo ships **four agent skills** (canonical sources: the root-level `davinci-resolve*`
+folders, each symlinked into `.claude/skills/`). They auto-load when Claude Code runs **inside
+this repo**, but **Claude Code and Claude Cowork both read `~/.claude/skills/`**, so install
+them **globally** so they're available everywhere:
+
+| Skill (root folder) | What it does |
+|---|---|
+| `davinci-resolve` | **Base** — set up **and** operate the MCP (all 324 tools). Start here. |
+| `davinci-resolve-use-plugins` | Apply ResolveFX/OFX to a clip and insert Fusion title/generator template packs (incl. purchased MotionVFX `.drfx`). |
+| `davinci-resolve-generate-plugin-list` | Index every installed plugin/effect/template into a TOC (`.json`/`.md` + a `CLAUDE.md` summary) that `use-plugins` consumes. Run once per machine / after installing packs. |
+| `davinci-resolve-remove-silences-bad-takes-and-umms` | Non-destructive first-pass editorial clean — remove dead-air silences, filler `um/uh`, and bad takes; verify A/V sync. |
 
 ```bash
+# Installs ALL of the repo's skills globally for every agent:
 npx skills add CiprianSpiridon/davinci-resolve-mcp --global --agent '*' -y
-# manual equivalent (Claude Code + Cowork both read this dir):
-mkdir -p ~/.claude/skills && cp -r davinci-resolve ~/.claude/skills/davinci-resolve
+
+# manual equivalent (Claude Code + Cowork both read ~/.claude/skills/):
+mkdir -p ~/.claude/skills
+for s in davinci-resolve \
+         davinci-resolve-use-plugins \
+         davinci-resolve-generate-plugin-list \
+         davinci-resolve-remove-silences-bad-takes-and-umms; do
+  cp -r "$s" ~/.claude/skills/"$s"
+done
 ```
 
-Do this as part of onboarding so the user gets the skill in Cowork too, not just when
-they're inside the repo with Claude Code.
+Do this as part of onboarding so the user gets **all four** skills in Cowork too, not just when
+they're inside the repo with Claude Code. The three companion skills all build on the base
+`davinci-resolve` skill — install it too, not just the companions.
 
 ---
 
@@ -289,6 +304,9 @@ project data.**
 - Repo at `<absolute path>`, virtualenv installed, `davinci-resolve-mcp` binary present.
 - Offline gate: **324 tools, 3 resources, unique names** (Phase 3).
 - Server registered with `<client>` using the absolute binary path.
+- **All four agent skills installed globally** (Phase 5d): `davinci-resolve` (base) +
+  `davinci-resolve-use-plugins`, `davinci-resolve-generate-plugin-list`,
+  `davinci-resolve-remove-silences-bad-takes-and-umms` — so they work in Cowork, not just in-repo.
 - Reminder to the user: External scripting must be `Local` and Resolve must be running
   for tools to act; the server is **Studio-oriented** (free edition degrades gracefully).
 - Suggest a first prompt: *"What DaVinci Resolve project is open? List the clips on video
