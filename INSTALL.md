@@ -134,8 +134,8 @@ Optionally run the test suite (installs `pytest` into the venv if missing):
 ./.venv/bin/pip install pytest -q && ./.venv/bin/pytest -q
 ```
 
-**Gate 3:** the snippet prints `OK: 324 tools, 3 resources, all names unique` (the count
-must be ≥ 100; 324 is expected — 306 live Resolve tools + 18 offline file tools). If it
+**Gate 3:** the snippet prints `OK: 326 tools, 3 resources, all names unique` (the count
+must be ≥ 100; 326 is expected — 308 live Resolve tools + 18 offline file tools). If it
 errors on import, the install is broken — see Troubleshooting; do not proceed to register
 a broken server.
 
@@ -232,7 +232,7 @@ them **globally** so they're available everywhere:
 
 | Skill (root folder) | What it does |
 |---|---|
-| `davinci-resolve` | **Base** — set up **and** operate the MCP (all 324 tools). Start here. |
+| `davinci-resolve` | **Base** — set up **and** operate the MCP (all 326 tools). Start here. |
 | `davinci-resolve-use-plugins` | Apply ResolveFX/OFX to a clip and insert Fusion title/generator template packs (incl. purchased MotionVFX `.drfx`). |
 | `davinci-resolve-generate-plugin-list` | Index every installed plugin/effect/template into a TOC (`.json`/`.md` + a `CLAUDE.md` summary) that `use-plugins` consumes. Run once per machine / after installing packs. |
 | `davinci-resolve-remove-silences-bad-takes-and-umms` | Non-destructive first-pass editorial clean — remove dead-air silences, filler `um/uh`, and bad takes; verify A/V sync. |
@@ -302,7 +302,7 @@ project data.**
 ## What "done" looks like (report this back to the user)
 
 - Repo at `<absolute path>`, virtualenv installed, `davinci-resolve-mcp` binary present.
-- Offline gate: **324 tools, 3 resources, unique names** (Phase 3).
+- Offline gate: **326 tools, 3 resources, unique names** (Phase 3).
 - Server registered with `<client>` using the absolute binary path.
 - **All four agent skills installed globally** (Phase 5d): `davinci-resolve` (base) +
   `davinci-resolve-use-plugins`, `davinci-resolve-generate-plugin-list`,

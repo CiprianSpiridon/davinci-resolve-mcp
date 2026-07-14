@@ -5,7 +5,7 @@ A full-coverage [Model Context Protocol](https://modelcontextprotocol.io) server
 compositing, Fairlight audio, AI/Neural Engine features, and rendering from any MCP
 client (Claude Desktop, Cursor, or your own agent).
 
-324 tools — **306 live** tools across 22 domain modules that drive a running Resolve
+326 tools — **308 live** tools across 22 domain modules that drive a running Resolve
 instance via its scripting API, plus **18 offline** tools that read/write Resolve's own
 files (`.drp`/`.drt`/`.drx`) and a local SQLite store with **no Resolve connection at
 all**. One server, one process, one `mcp = FastMCP(...)` instance — every tool connects
@@ -125,8 +125,8 @@ src/davinci_resolve_mcp/
 
 ## Tool catalog
 
-**324 tools total** (verified by `tests/test_tool_exposure.py`, which imports the whole
-server with no Resolve instance present and asserts on `mcp.list_tools()`): **306 live**
+**326 tools total** (verified by `tests/test_tool_exposure.py`, which imports the whole
+server with no Resolve instance present and asserts on `mcp.list_tools()`): **308 live**
 tools across the 22 domain modules below, driving a running Resolve instance, plus **18
 offline** tools (covered in the [next section](#offline-no-resolve-tools)) that never
 touch Resolve at all. Also 3 read-only MCP resources and 1 prompt.
@@ -144,7 +144,7 @@ touch Resolve at all. Also 3 read-only MCP resources and 1 prompt.
 | `tools/fusion.py` | Fusion comp management on timeline items — list/add/import/export/load/delete/rename | 16 |
 | `tools/timeline_edit.py` | Timeline mutation — insert/append/delete/move edits, scene-cut detection | 12 |
 | `tools/audio.py` | Audio / Fairlight — voice isolation, audio-specific track tools | 10 |
-| `tools/fx_plugins.py` | OFX / FX plugins — apply, configure, and manage effects on timeline items | 10 |
+| `tools/fx_plugins.py` | OFX / FX plugins — apply, configure, and manage effects on timeline items | 12 |
 | `tools/project.py` | Project info & settings — summary, get/set settings, name, supported render resolutions | 10 |
 | `tools/inspector.py` | Inspector — timeline-item property inspection and editing | 8 |
 | `tools/media_storage.py` | `MediaStorage` — mounted-volume browsing, add-to-media-pool | 7 |
@@ -155,7 +155,7 @@ touch Resolve at all. Also 3 read-only MCP resources and 1 prompt.
 | `tools/export_still.py` | Timeline export, current-frame still export, clip thumbnail grab | 3 |
 | `tools/code.py` | `execute_resolve_code` — arbitrary-snippet escape hatch for uncovered API surface | 1 |
 | `tools/screenshot.py` | Screenshot of the running Resolve UI, returned as an in-band MCP `Image` | 1 |
-| **Total** | | **306** |
+| **Total** | | **308** |
 
 Plus:
 - **3 read-only resources** (`resources.py`): `resolve://project/info`,
@@ -164,7 +164,7 @@ Plus:
   driving Resolve through this tool surface.
 
 Run `./.venv/bin/python -c "from davinci_resolve_mcp.server import mcp; import asyncio; print(len(asyncio.run(mcp.list_tools())))"`
-yourself at any time to re-verify the live count (306 + 18 = 324) — no Resolve
+yourself at any time to re-verify the live count (308 + 18 = 326) — no Resolve
 installation required.
 
 ## Offline (no-Resolve) tools
@@ -278,7 +278,7 @@ npx @ciprianspiridon/davinci-resolve-mcp doctor      # health check
 ```
 
 After installing, check health any time with **`davinci-resolve-mcp doctor`** (verifies
-all 324 tools — 306 live + 18 offline — register and, if Resolve is running, that a live
+all 326 tools — 308 live + 18 offline — register and, if Resolve is running, that a live
 connection succeeds). The `setup`/`doctor` subcommands are also available on the console script directly
 (`davinci-resolve-mcp setup --clients cursor`).
 
@@ -432,7 +432,7 @@ yourself and point a client at the console script directly.
 `tests/test_tool_exposure.py` imports the full server with **no DaVinci Resolve
 instance present and no network access**, and asserts:
 
-- at least 100 tools are registered (the real count is 324: 306 live + 18 offline —
+- at least 100 tools are registered (the real count is 326: 308 live + 18 offline —
   see the [Tool catalog](#tool-catalog) and [Offline tools](#offline-no-resolve-tools)
   sections above),
 - every tool name is globally unique,

@@ -1,6 +1,6 @@
 # DaVinci Resolve MCP — full tool reference
 
-Auto-generated from `mcp.list_tools()` — **324 tools** (306 live + 18 offline) across 40 modules.
+Auto-generated from `mcp.list_tools()` — **326 tools** (308 live + 18 offline) across 40 modules.
 
 ## Live tools (drive a running DaVinci Resolve via the scripting API)
 
@@ -271,16 +271,18 @@ Auto-generated from `mcp.list_tools()` — **324 tools** (306 live + 18 offline)
 - **set_track_volume** — Set the fader volume (gain) of a whole audio track on the timeline.
 - **set_voice_isolation_state** — Enable/disable Voice Isolation on an audio track (isolate speech from noise).
 
-### `tools/fx_plugins.py` (10)
+### `tools/fx_plugins.py` (12)
 - **append_template_with_placement** — Place a Media Pool item onto a video track with explicit framing.
 - **apply_ofx_to_clip** — Apply an OFX / ResolveFX plugin to a timeline clip via its Fusion comp.
 - **attach_fusion_comp** — Import a saved Fusion composition onto an existing timeline item.
 - **discover_regid** — Read a LIVE Fusion tool's ``TOOLS_RegID`` (ground-truth RegID).
 - **enumerate_ofx** — List installed OFX plugin bundles (``*.ofx.bundle``) on this machine.
 - **enumerate_templates** — List Fusion Edit templates (titles/generators/etc.) on this machine.
+- **get_template_controls** — Read a template's exposed Inspector controls (macro_tool + published input keys) offline.
 - **insert_template_by_name** — Insert a title / generator template at the playhead of the current timeline.
 - **install_dctl** — Write a DCTL source file into Resolve's LUT or ACES Transforms tree.
 - **install_fuse** — Write a Fusion Fuse (.fuse) source file into Fusion's Fuses directory.
+- **set_template_fields** — Set several controls (text/color/scale/…) on a placed template in one call.
 
 ### `tools/project.py` (10)
 - **get_all_project_settings** — Get every setting on the current project, as JSON.

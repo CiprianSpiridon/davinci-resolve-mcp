@@ -5,7 +5,7 @@ description: >-
   Set up and drive DaVinci Resolve through the davinci-resolve MCP server: editing, media
   pool, color grading, Fusion, Fairlight audio, AI/Neural Engine, rendering, and local
   transcription — plus 18 OFFLINE tools that read/write Resolve's own .drp/.drt/.drx files
-  and a local SQLite store with no Resolve running (324 tools total). Use when the user wants to
+  and a local SQLite store with no Resolve running (326 tools total). Use when the user wants to
   inspect or change a Resolve project, timeline, clips, transform/reframe, grade, effects,
   Fusion titles, transitions, subtitles, or renders, or to work on .drp/.drt/.drx files
   without Resolve — e.g. "add markers", "cut this timeline", "grade this clip", "reframe
@@ -22,7 +22,7 @@ argument-hint: "[a DaVinci Resolve task, e.g. 'render an H.264' | 'what's on vid
 
 # DaVinci Resolve MCP
 
-Drives the **`davinci-resolve` MCP server**: **324 tools** — **306 live** across 18 domains
+Drives the **`davinci-resolve` MCP server**: **326 tools** — **308 live** across 18 domains
 (project/timeline/media/color/Fusion/Fairlight/AI/render/transcription) that drive a running
 Resolve, plus **18 offline** tools that read/write Resolve's own files (`.drp`/`.drt`/`.drx`)
 and a local SQLite store with **no Resolve running** — plus 3 `resolve://` resources and an
@@ -83,7 +83,7 @@ Full recipe for each is in **[`reference/cookbook.md`](./reference/cookbook.md)*
   Start here for any "how do I…" task.
 - [`reference/fusion-tools.md`](./reference/fusion-tools.md) — Fusion node tools and
   Inspector input tables (address nodes/inputs by name).
-- [`reference/tool-catalog.md`](./reference/tool-catalog.md) — the exact 324-tool list
+- [`reference/tool-catalog.md`](./reference/tool-catalog.md) — the exact 326-tool list
   (live + offline) with one-line descriptions, grouped by module. Open it for a precise
   tool name/param.
 - [`reference/operating-notes.md`](./reference/operating-notes.md) — gotchas for the newer /

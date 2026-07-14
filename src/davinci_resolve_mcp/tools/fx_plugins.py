@@ -67,7 +67,7 @@ from ..helpers import (
     _ok,
     _require_timeline,
 )
-from .fusion import _get_fusion_comp
+from .fusion import _get_fusion_comp, _resolve_tool, _set_tool_input
 from .media_pool import _media_pool
 
 # The template kinds :func:`insert_template_by_name` can dispatch, mapped to the
@@ -826,6 +826,209 @@ def enumerate_ofx() -> str:
             indent=2,
             default=str,
         )
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+# ── Template control schema (drive an installed template's Inspector controls) ──
+# A Fusion template (title/generator/effect) publishes its editable UI as
+# InstanceInputs on a MacroOperator inside its .setting; the published input keys
+# differ per template so they must be READ, never generalized.
+_TEXT_SRC = re.compile(r"StyledText|Text\d*|WordsText")
+_COLOR_SRC = re.compile(r"(Red|Green|Blue|Alpha)\d")
+_KIND_LABEL = {
+    "text": "Text", "color": "Color", "scale": "Scale", "position": "Position",
+    "rotation": "Rotation", "opacity": "Opacity/Enable", "font": "Font",
+    "style": "Style", "value": "Value",
+}
+
+
+def _field(body: str, key: str) -> str:
+    """Extract a scalar field value from a Fusion InstanceInput body."""
+    m = re.search(rf'{key}\s*=\s*(?:"([^"]*)"|([^,\n}}]+))', body)
+    if not m:
+        return ""
+    return (m.group(1) if m.group(1) is not None else m.group(2)).strip()
+
+
+def _control_kind(source: str) -> str:
+    """Classify an InstanceInput ``Source`` into a logical control kind."""
+    if _TEXT_SRC.fullmatch(source):
+        return "text"
+    if _COLOR_SRC.match(source):
+        return "color"
+    if source == "Size":
+        return "scale"
+    if source == "Center":
+        return "position"
+    if source == "Angle":
+        return "rotation"
+    if source == "Blend":
+        return "opacity"
+    if source == "Font":
+        return "font"
+    if source == "Style":
+        return "style"
+    if source == "Value":
+        return "value"
+    return "other"
+
+
+def _parse_template_controls(txt: str) -> Dict[str, Any]:
+    """Comprehensive, deduped control schema from a Fusion .setting's published InstanceInputs.
+
+    Colors (R/G/B/A) collapse into ONE logical control with its 4 keys; scale/
+    position/etc. stay one control per (node, label). Section headers
+    (``CustomLabels`` / ``'<X> Controls'``) are dropped. Keys are the published
+    input IDs on the macro — set via ``fusion_set_input(macro_tool, <key>, value)``
+    on the placed item. ``text_fields`` is the text subset for convenience.
+    """
+    m = re.search(r"(\w+)\s*=\s*MacroOperator\s*\{", txt)
+    macro_tool = m.group(1) if m else ""
+    blocks = re.findall(r"(\w+)\s*=\s*InstanceInput\s*\{(.*?)\}", txt, re.S)
+    text_fields: List[Dict[str, str]] = []
+    order: List[Any] = []
+    groups: Dict[Any, Dict[str, Any]] = {}
+    for key, body in blocks:
+        source, node = _field(body, "Source"), _field(body, "SourceOp")
+        name, default = _field(body, "Name"), _field(body, "Default")
+        if node == "CustomLabels" or name.endswith("Controls"):
+            continue  # section header, not a control
+        kind = _control_kind(source)
+        if kind == "text":
+            text_fields.append({"input": key, "node": node})
+        label = name or (f"Text ({node})" if kind == "text" else _KIND_LABEL.get(kind, source))
+        gk = (node, label, kind)
+        if gk not in groups:
+            groups[gk] = {"name": label, "node": node, "kind": kind, "keys": [], "default": default}
+            order.append(gk)
+        groups[gk]["keys"].append(key)
+    return {"macro_tool": macro_tool, "n_controls": len(blocks),
+            "text_fields": text_fields, "options": [groups[gk] for gk in order]}
+
+
+def _find_template_setting(name: str, pack: str = "", scope: str = "all"):
+    """Return ``(setting_text, pack_filename, member_path)`` for a template by insert name.
+
+    Searches the same ``Fusion/Templates`` roots as :func:`enumerate_templates`;
+    opens ``.drfx`` packs to find the matching internal ``<name>.setting``, and
+    also matches loose ``.setting`` files. Returns ``(None, "", "")`` when not found.
+    """
+    target = name.lower() + ".setting"
+    for _scope_label, root in _template_roots(scope):
+        if not os.path.isdir(root):
+            continue
+        for dirpath, _dn, filenames in os.walk(root):
+            for fname in filenames:
+                low = fname.lower()
+                if low == target and not pack:
+                    with open(os.path.join(dirpath, fname), encoding="utf-8", errors="ignore") as fh:
+                        return fh.read(), "", os.path.join(dirpath, fname)
+                if low.endswith(".drfx") and (not pack or fname == pack):
+                    try:
+                        with zipfile.ZipFile(os.path.join(dirpath, fname)) as zf:
+                            for mem in zf.namelist():
+                                if "__MACOSX" in mem or not mem.lower().endswith(".setting"):
+                                    continue
+                                if os.path.basename(mem)[: -len(".setting")] == name:
+                                    return zf.read(mem).decode("utf-8", "ignore"), fname, mem
+                    except (zipfile.BadZipFile, OSError):
+                        continue
+    return None, "", ""
+
+
+@mcp.tool()
+def get_template_controls(name: str, pack: str = "", scope: str = "all") -> str:
+    """Get the exposed Inspector controls of an installed Fusion template (offline; no Resolve).
+
+    A template (title/generator/effect, e.g. a MotionVFX .drfx entry) publishes its UI controls as
+    InstanceInputs on a MacroOperator. This returns the addressing you need to configure it:
+      - macro_tool: the tool name once placed (== the fusion_set_input/get_input tool_name).
+      - text_fields: [{input, node}] for every editable text line.
+      - options: comprehensive deduped controls [{name, kind, node, keys, default}] — colors group
+        their R/G/B/A into one entry's keys; kinds: text/color/scale/position/rotation/opacity/font/
+        style/value/other. Set any via fusion_set_input(macro_tool, <key>, value) on the placed item
+        (or set several at once with set_template_fields).
+
+    Parameters:
+    - name: template insert name as from enumerate_templates (e.g. "mTuber 4 Lower 01").
+    - pack: optional .drfx filename to disambiguate a name present in multiple packs.
+    - scope: "all" (default), "shipped", or "user".
+    """
+    try:
+        canonical, err = _check_choice(scope, ("all", "shipped", "user"), "scope")
+        if err:
+            return f"Error: {err}"
+        txt, found_pack, member = _find_template_setting(name, pack, canonical)
+        if txt is None:
+            return (f"Error: template {name!r} not found in {canonical} templates. Use "
+                    "enumerate_templates() for exact names (and pack= to disambiguate).")
+        data = _parse_template_controls(txt)
+        return json.dumps({"success": True, "name": name, "pack": found_pack, "member": member,
+                           **data}, indent=2, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001
+        return f"Error: {e}"
+
+
+@mcp.tool()
+def set_template_fields(
+    fields: str,
+    track_type: str = "video",
+    track_index: int = 1,
+    item_index: int = 0,
+    comp_index: int = 1,
+    name: str = "",
+) -> str:
+    """Set several controls on a PLACED Fusion template at once (text lines, colors, scale, …).
+
+    Operates on an already-inserted template (see insert_template_by_name) — it does NOT insert.
+    ``fields`` is a JSON object mapping a **logical control name** (case-insensitive, e.g.
+    "Text (Header)", "Header Color") OR a **published key** (e.g. "Input7") -> value. Logical names
+    are resolved to published keys via the template's schema (get_template_controls). A color
+    control accepts a comma value "r,g,b" or "r,g,b,a" spread across its keys, or you may target one
+    channel by its key. Returns per-field {key, ok, readback}.
+
+    Parameters:
+    - fields: JSON object {control_name_or_key: value}.
+    - track_type / track_index / item_index: locate the placed template item.
+    - comp_index: 1-based Fusion composition index on the item (default 1).
+    - name: template insert name for schema lookup; defaults to the placed item's name.
+    """
+    try:
+        try:
+            mapping = json.loads(fields) if isinstance(fields, str) else dict(fields)
+            if not isinstance(mapping, dict):
+                raise ValueError
+        except Exception:
+            return "Error: fields must be a JSON object of {control_name_or_key: value}."
+
+        item = _get_timeline_item(track_type, track_index, item_index)
+        tpl_name = name or item.GetName()
+        txt, _pack, _member = _find_template_setting(tpl_name)
+        if txt is None:
+            return (f"Error: could not find the template schema for placed item {tpl_name!r}. "
+                    "Pass name= with the template's insert name (see enumerate_templates).")
+        schema = _parse_template_controls(txt)
+        macro = schema["macro_tool"]
+        comp = _get_fusion_comp(item, comp_index)
+        tool = _resolve_tool(comp, macro)
+
+        by_label = {o["name"].lower(): o for o in schema["options"]}
+        results: List[Dict[str, Any]] = []
+        for field, value in mapping.items():
+            opt = by_label.get(str(field).lower())
+            keys = opt["keys"] if opt else ([field] if re.fullmatch(r"\w+", str(field)) else [])
+            if not keys:
+                results.append({"field": field, "ok": False, "error": "unknown control name/key"})
+                continue
+            is_color = bool(opt) and opt["kind"] == "color" and "," in str(value)
+            vals = [v.strip() for v in str(value).split(",")] if is_color else [str(value)]
+            for i, key in enumerate(keys):
+                v = vals[i] if i < len(vals) else vals[-1]
+                res = _set_tool_input(tool, key, v)
+                results.append({"field": field, "key": key, **res})
+        return json.dumps({"success": True, "template": tpl_name, "macro_tool": macro,
+                           "results": results}, indent=2, default=str, ensure_ascii=False)
     except Exception as e:  # noqa: BLE001
         return f"Error: {e}"
 

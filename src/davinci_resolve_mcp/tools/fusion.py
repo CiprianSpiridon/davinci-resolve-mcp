@@ -489,6 +489,58 @@ def fusion_connect_input(
         return f"Error: {e}"
 
 
+def _set_tool_input(
+    tool, input_name: str, value: Any, time: Optional[int] = None
+) -> Dict[str, Any]:
+    """Coerce, set, and readback-verify ONE Fusion tool input.
+
+    Shared core of :func:`fusion_set_input` and
+    ``fx_plugins.set_template_fields`` so both get identical coercion/verify
+    behaviour. Text inputs receive the raw string (never coerced, so literals
+    like "1.0"/"007" survive); numeric/boolean inputs are coerced. On a readback
+    mismatch with a label string, the OFX-enum integer-index fallback is applied.
+
+    Returns ``{"ok": bool, "value": coerced, "readback": ...}`` optionally with
+    ``"resolved_index"`` + ``"note"`` (enum fallback) or ``"warning"`` (mismatch).
+    """
+    inp = _input_object(tool, input_name)
+    data_type = ""
+    try:
+        data_type = (inp.GetAttrs() or {}).get("INPS_DataType", "") if inp else ""
+    except Exception:
+        data_type = ""
+    if isinstance(data_type, str) and data_type.startswith("Text"):
+        coerced = value
+    else:
+        coerced = _coerce_value(value)
+
+    def _set(v: Any) -> None:
+        if time is not None:
+            tool.SetInput(input_name, v, time)
+        else:
+            tool.SetInput(input_name, v)
+
+    def _get() -> Any:
+        if time is not None:
+            return tool.GetInput(input_name, time)
+        return tool.GetInput(input_name)
+
+    _set(coerced)
+    readback = _get()
+    if _values_match(readback, coerced):
+        return {"ok": True, "value": coerced, "readback": readback}
+    if isinstance(coerced, str):
+        idx = _ofx_enum_index(_input_object(tool, input_name), coerced)
+        if idx is not None:
+            _set(idx)
+            readback = _get()
+            return {"ok": True, "value": coerced, "resolved_index": idx,
+                    "readback": readback,
+                    "note": "OFX enum label mapped to integer index"}
+    return {"ok": False, "value": coerced, "readback": readback,
+            "warning": "readback did not match the requested value"}
+
+
 @mcp.tool()
 def fusion_set_input(
     tool_name: str,
@@ -526,69 +578,20 @@ def fusion_set_input(
         item = _get_timeline_item(track_type, track_index, item_index)
         comp = _get_fusion_comp(item, comp_index)
         tool = _resolve_tool(comp, tool_name)
-
-        # Text/string inputs (e.g. StyledText) must receive the raw string —
-        # coercing would corrupt literal values like "1.0" -> 1 or "007" -> 7
-        # before Fusion ever sees them. Only coerce numeric/boolean inputs.
-        inp = _input_object(tool, input_name)
-        data_type = ""
-        try:
-            data_type = (inp.GetAttrs() or {}).get("INPS_DataType", "") if inp else ""
-        except Exception:
-            data_type = ""
-        if isinstance(data_type, str) and data_type.startswith("Text"):
-            coerced = value
-        else:
-            coerced = _coerce_value(value)
-
-        def _set(v: Any) -> None:
-            if time is not None:
-                tool.SetInput(input_name, v, time)
-            else:
-                tool.SetInput(input_name, v)
-
-        def _get() -> Any:
-            if time is not None:
-                return tool.GetInput(input_name, time)
-            return tool.GetInput(input_name)
-
-        _set(coerced)
-        readback = _get()
-
-        if _values_match(readback, coerced):
-            return json.dumps({
-                "success": True,
-                "tool_name": tool_name,
-                "input_name": input_name,
-                "value": coerced,
-                "readback": readback,
-            }, indent=2, default=str)
-
-        # Readback mismatch — try the OFX enum integer-index fallback when the
-        # value was an (unmatched) label string.
-        if isinstance(coerced, str):
-            idx = _ofx_enum_index(_input_object(tool, input_name), coerced)
-            if idx is not None:
-                _set(idx)
-                readback = _get()
-                return json.dumps({
-                    "success": True,
-                    "tool_name": tool_name,
-                    "input_name": input_name,
-                    "value": coerced,
-                    "resolved_index": idx,
-                    "readback": readback,
-                    "note": "OFX enum label mapped to integer index",
-                }, indent=2, default=str)
-
-        return json.dumps({
+        res = _set_tool_input(tool, input_name, value, time)
+        payload: Dict[str, Any] = {
             "success": True,
             "tool_name": tool_name,
             "input_name": input_name,
-            "value": coerced,
-            "readback": readback,
-            "warning": "readback did not match the requested value",
-        }, indent=2, default=str)
+            "value": res["value"],
+            "readback": res.get("readback"),
+        }
+        if "resolved_index" in res:
+            payload["resolved_index"] = res["resolved_index"]
+            payload["note"] = res["note"]
+        if res.get("warning"):
+            payload["warning"] = res["warning"]
+        return json.dumps(payload, indent=2, default=str)
     except Exception as e:
         return f"Error: {e}"
 
