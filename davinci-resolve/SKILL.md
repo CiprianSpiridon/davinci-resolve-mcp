@@ -5,155 +5,93 @@ description: >-
   Set up and drive DaVinci Resolve through the davinci-resolve MCP server: editing, media
   pool, color grading, Fusion, Fairlight audio, AI/Neural Engine, rendering, and local
   transcription — plus 18 OFFLINE tools that read/write Resolve's own .drp/.drt/.drx files
-  and a local SQLite store with no Resolve running (324 tools total). Handles first-run
-  ONBOARDING (installs and registers the MCP server if it isn't configured yet) and
-  day-to-day operation. Use when the user wants to set up the DaVinci Resolve MCP, or to
-  inspect/change a Resolve project, timeline, clips, grade, titles, subtitles, or renders,
-  or to work on .drp/.drt/.drx files without Resolve — e.g. "install the resolve mcp",
-  "add markers", "cut this timeline", "grade this clip", "vertical reframe", "render an
-  H.264", "transcribe and add subtitles", "edit this .drx offline", "what's on video track
-  1". Do NOT use for non-Resolve video tools.
+  and a local SQLite store with no Resolve running (324 tools total). Use when the user wants to
+  inspect or change a Resolve project, timeline, clips, transform/reframe, grade, effects,
+  Fusion titles, transitions, subtitles, or renders, or to work on .drp/.drt/.drx files
+  without Resolve — e.g. "add markers", "cut this timeline", "grade this clip", "reframe
+  vertical", "apply a blur", "build a lower third", "render an H.264", "transcribe and add
+  subtitles", "edit this .drx offline", "what's on video track 1". Do NOT use for non-Resolve
+  video tools.
 when_to_use: >-
-  Trigger on two situations: (1) SETUP — the user asks to install/configure/onboard the
-  DaVinci Resolve MCP, or you try a resolve tool and it isn't available; run the Onboarding
-  flow. (2) OPERATION — the user asks to inspect or change anything in a DaVinci Resolve
-  project (timeline, clips, media, color, Fusion, audio, subtitles, render); run the
-  operating workflow. Do not use for other NLEs or generic ffmpeg tasks.
-argument-hint: "[install the resolve mcp | a DaVinci Resolve task, e.g. 'render an H.264']"
+  Trigger when the user asks to inspect or change anything in a DaVinci Resolve project
+  (timeline, clips, media, transform, color, Fusion, effects, transitions, audio, subtitles,
+  render). If the MCP server isn't installed yet, INSTALL.md at the repo root has the setup
+  steps. Do not use for other NLEs or generic ffmpeg tasks.
+argument-hint: "[a DaVinci Resolve task, e.g. 'render an H.264' | 'what's on video track 1']"
 ---
 
-# DaVinci Resolve MCP — setup & operation
+# DaVinci Resolve MCP
 
-This skill covers the **`davinci-resolve` MCP server** end to end: onboarding a machine
-that doesn't have it yet, then operating its **324 tools** — **306 live** across 18 domains
+Drives the **`davinci-resolve` MCP server**: **324 tools** — **306 live** across 18 domains
 (project/timeline/media/color/Fusion/Fairlight/AI/render/transcription) that drive a running
 Resolve, plus **18 offline** tools that read/write Resolve's own files (`.drp`/`.drt`/`.drx`)
-and a local SQLite store with no Resolve running — plus 3 `resolve://` resources and an
+and a local SQLite store with **no Resolve running** — plus 3 `resolve://` resources and an
 `editing_strategy` prompt.
 
-**Three references, loaded on demand (don't inline them):**
-- [`reference/setup.md`](./reference/setup.md) — the full, gated MCP install/registration
-  runbook. Open it when onboarding.
-- [`reference/tool-catalog.md`](./reference/tool-catalog.md) — the exact 324-tool list
-  (live + offline) with one-line descriptions, grouped by module. Open it when you need a
-  precise tool name/param.
-- [`reference/operating-notes.md`](./reference/operating-notes.md) — real-world gotchas for
-  the newer / less-obvious surface (Neural-Engine-extras that return `False` not an error,
-  gallery stills needing the panel visible, color-managed-only input color space, the
-  no-transition-object hybrid, the `ofx.` prefix + `MediaOut1` splice, BezierSpline-first
-  keyframing, read-only node graphs, Studio-18.5-gated cloud projects, `quit_resolve`
-  terminating the app). Open it before driving those tools.
+**Not installed?** If the `mcp__davinci-resolve__*` tools aren't exposed, see
+**[`INSTALL.md`](../INSTALL.md)** at the repo root. Everything below assumes a configured server.
 
 ---
 
-## Step 1 — Is the MCP available? (decide setup vs operation)
+## Using the tools
 
-Check whether the `davinci-resolve` MCP tools are exposed in this session (tool names look
-like `mcp__davinci-resolve__get_project_info`, or your client lists a `davinci-resolve`
-server).
-
-- **Tools present** → go to [Operating workflow](#operating-workflow).
-- **Tools absent, or the user asked to install/set up** → run
-  **[Onboarding](#step-2--onboarding-install--register-the-mcp)** first.
-
-## Step 2 — Onboarding (install & register the MCP)
-
-**Open [`reference/setup.md`](./reference/setup.md) and follow it phase by phase.** It is a
-gated runbook that: detects OS/Python (≥3.10), clones the repo, creates a `.venv` and
-editable-installs the server, verifies **324 tools register offline** (no Resolve needed),
-flags the two **human-only** steps (enable Resolve *External scripting = Local*; restart
-the MCP client), registers the server with Claude Code (`claude mcp add`), Claude Desktop,
-or Cursor using an **absolute** venv binary path, and runs a live smoke test.
-
-Non-negotiables during setup (from that runbook):
-- **Absolute paths only** in client config — MCP clients don't inherit `PATH`/venvs.
-- **You can't do the two GUI/restart steps** — instruct the user and wait.
-- Never install outside `.venv`; never disable TLS.
-
-When onboarding is done, tell the user it's ready and offer a first prompt (e.g. *"What
-project is open? List the clips on video track 1."*), then continue with operation.
-
-## Operating workflow
-
-**Every tool returns a plain string; failures come back as `"Error: ..."` strings, never
+**Every tool returns a plain string; failures come back as `"Error: ..."`, never
 exceptions.** Read the returned string and react — never assume success.
 
-**Before driving the newer / less-obvious surface, skim
-[`reference/operating-notes.md`](./reference/operating-notes.md).** It captures the gotchas
-that look like bugs but aren't: Neural-Engine extras that return `False` (not an error),
-gallery stills needing the Gallery panel visible, `set_input_color_space` requiring a
-color-managed project, the API's **no transition object** (offline `.drt`/`.drp` writes are
-`"verified": false`, or use the Cmd+T keystroke hybrid), `apply_ofx_to_clip` keeping the
-`ofx.` prefix and splicing before `MediaOut1`, keyframing a virgin Fusion input needing a
-`BezierSpline` first, read-only color node graphs, Studio-18.5-gated cloud projects, and
-`quit_resolve` terminating the app.
+**Preconditions:** Resolve running with a project open, and **Preferences → General →
+"External scripting using" = Local**. `Error: Could not connect to DaVinci Resolve` means one
+of these is missing — fix it, don't retry blindly. Scripting is a **Studio** feature; on the
+free edition, Studio-only tools (Magic Mask, Smart Reframe, Stabilize, AI subtitles, Voice
+Isolation) return a "requires Resolve Studio" string — expected, not a bug.
 
-### Preconditions
-1. `davinci-resolve` MCP configured (else run onboarding).
-2. **Resolve running with a project open**, and **Preferences → General → "External
-   scripting using" = Local**. `Error: Could not connect to DaVinci Resolve` means one of
-   these is missing — fix the precondition, don't retry blindly.
-3. Scripting is a Resolve **Studio** feature. On the free edition, Studio-only tools (Magic
-   Mask, Smart Reframe, Stabilize, AI subtitles, Voice Isolation) return a "requires
-   Resolve Studio" string — expected, not a bug to work around.
-
-### Loop: orient → act → verify
+**Loop: orient → act → verify**
 1. **Orient first.** `get_project_info`, `get_current_page`, `get_current_timeline_info`,
    `get_timeline_items` — or read `resolve://project/info`, `resolve://timeline/current`,
    `resolve://mediapool/structure`. **Use `screenshot` as your eyes**: before a visual
    change, after it, when the user describes something visual, and when debugging.
-2. **Switch page** with `open_page` when needed (`color` for grading, `fusion` for comps,
-   `deliver` for rendering).
-3. **Act with the most specific tool** (not the generic escape hatch — see Safety). Locate
-   timeline items by `track_type` (video/audio/subtitle) + 1-based `track_index` + 0-based
-   `item_index`.
+2. **Switch page** with `open_page` when needed (`color` grading, `fusion` comps, `deliver`
+   rendering).
+3. **Act with the most specific tool** (not the `execute_resolve_code` escape hatch — see
+   Safety).
 4. **Verify** by re-reading state or a `screenshot`, and relay the tool's own result string.
 
-### Tool map by task (exact names/params in `reference/tool-catalog.md`)
-- **Navigate/inspect**: `open_page`, `get_current_page`, `get_project_info`, layout presets,
-  keyframe mode → `tools/resolve_app.py`, `tools/project.py`.
-- **Projects (lifecycle)**: create/load/save/close/delete, databases, import/export →
-  `tools/project_manager.py`.
-- **Media**: volumes + import (`tools/media_storage.py`); bins, import, move/delete/relink,
-  create timelines (`tools/media_pool.py`); per-clip props/metadata/markers/flags/color/
-  proxies (`tools/media_pool_item.py`).
-- **Timeline (read)**: list/switch/duplicate, settings, tracks, timecode, item listing →
-  `tools/timeline.py`. **Timeline (edit)**: markers, inserts (`insert_*`), compound clips,
-  `detect_scene_cuts` → `tools/timeline_edit.py`. **Per-item** props/transforms/takes →
-  `tools/timeline_item.py`.
-- **Color**: node graph, `set_lut`, `set_cdl`, color versions, gallery `grab_still` →
-  `tools/color.py` (color page). **Fusion**: comp management + `create_fusion_clip` →
-  `tools/fusion.py` (deep node work: `execute_resolve_code`).
-- **Audio/Fairlight**: voice isolation, audio tracks → `tools/audio.py`.
-- **AI/Neural Engine** (Studio): Magic Mask, Smart Reframe, Stabilize,
-  `create_subtitles_from_audio` → `tools/ai.py`.
-- **Render/Deliver**: formats/codecs/presets, settings, `add_render_job`/`start_rendering`/
-  `get_render_job_status`/`stop_rendering` → `tools/render.py`.
-- **Export/stills**: `export_timeline`, `export_current_frame`, `get_current_thumbnail` →
-  `tools/export_still.py`.
-- **Transcription (local, no Studio)**: `transcribe_audio`, `transcribe_and_add_subtitles`,
-  `export_srt`, `list_whisper_models` → `tools/transcription.py` (needs Whisper + ffmpeg).
-- **Uncovered API**: `execute_resolve_code` → `tools/code.py`.
+**Item-locator convention.** Every timeline-item tool addresses a clip by three args:
+`track_type` (`video`/`audio`/`subtitle`) + **1-based** `track_index` + **0-based**
+`item_index`. Fusion tools add a **1-based** `comp_index`.
 
-### Offline tools (operate on Resolve FILES + a local SQLite store — **no Resolve needed**)
-These 18 action-dispatch tools each take an `action` param + typed args and work with
-**no running Resolve** (cloud or local). They read/write Resolve's own files and a local
-DB. **Grade/file WRITE actions return `"verified": false`** — they're structurally valid
-but not yet calibrated against a live Resolve panel, so tell the user that before they
-rely on a written `.drx`/`.drp`.
-- **Files**: `drx` (color grades — inspect/decode/export-CDL/attach-LUT/write), `drt`
-  (timelines — parse/author/validate/inject/extract), `drp` (projects — read/author/edit),
-  `offline_fusion` (comps).
-- **Project intelligence**: `project_read` (lint / clip queries), `project_db`
-  (index + `relayout_node_graphs` — tidy node layout, grade bytes preserved),
-  `conform` (relink QC + lineage), `color_trace` (carry grades across a re-conform),
-  `editorial` (changelist / integrity), `media_ingest` (scan → manifest).
-- **Grade/QC compute**: via `drx` actions and the grading cores (CDL ops, white-balance,
-  skin-match, broadcast-legal/gamut `qc`), `deliverable` (compliance QC), `offline_ref`.
-- **Orchestration**: `pipeline` (DB-as-truth: YAML/JSON spec → SQLite → staged runs with
-  gates + provenance + intent-vs-actual drift), `provenance` (audit / episode report),
-  `capabilities` (what's available + dep status + verified/unverified state).
-Full names/actions: [`reference/tool-catalog.md`](./reference/tool-catalog.md).
+### Quick index: TASK → tools
+Full recipe for each is in **[`reference/cookbook.md`](./reference/cookbook.md)**.
+
+| Task | Tools | Recipe |
+|---|---|---|
+| Reframe / transform (pan, zoom, rotate, flip) | `set_transform`, `reset_transform`, `smart_reframe` (Studio) | cookbook → Reframe |
+| Crop / dynamic zoom / retime | `set_cropping`, `set_dynamic_zoom`, `set_retime_and_scaling`, `set_composite` | cookbook → Crop |
+| Keyframe a move | `add_transform_keyframe`, `get_transform_keyframes`, `delete_transform_keyframe` | cookbook → Keyframe |
+| Apply an effect (ResolveFX/OFX) | `enumerate_ofx`, `get_resolvefx_registry`, `discover_regid`, `apply_ofx_to_clip` | cookbook → Apply an effect |
+| Apply a template | `enumerate_templates`, `insert_template_by_name`, `append_template_with_placement` | cookbook → template |
+| Build / edit a title | `fusion_add_tool`, `set_title_text`, `insert_title`, `insert_fusion_title` | cookbook → title |
+| Fusion comp node work | `add_fusion_comp`, `fusion_add_tool`, `fusion_set_input`, `fusion_connect_input` | **fusion-tools.md** |
+| Transition at a cut | `add_default_transition_at_cut` (live), `place_transition` (offline `.drt`/`.drp`) | cookbook → Transition |
+| Grade a clip | `open_page('color')`, `get_node_graph`, `set_cdl`, `set_lut`, `apply_grade_from_drx` | cookbook → Grade |
+| Render / deliver | `set_render_format_and_codec`, `set_render_settings`, `add_render_job`, `start_rendering`, `get_render_job_status` | cookbook → Render |
+| Subtitles / transcription | `create_subtitles_from_audio` (Studio), `transcribe_and_add_subtitles`, `export_srt` | cookbook → Subtitles |
+| Markers | `add_marker`, `add_item_marker`, `add_clip_marker` | cookbook → Markers |
+| Inspect the timeline | `get_current_timeline_info`, `get_timeline_items`, `screenshot` | the orient loop above |
+
+**References, loaded on demand (don't inline them):**
+- **[`reference/cookbook.md`](./reference/cookbook.md)** — task recipes, the primary how-to.
+  Start here for any "how do I…" task.
+- [`reference/fusion-tools.md`](./reference/fusion-tools.md) — Fusion node tools and
+  Inspector input tables (address nodes/inputs by name).
+- [`reference/tool-catalog.md`](./reference/tool-catalog.md) — the exact 324-tool list
+  (live + offline) with one-line descriptions, grouped by module. Open it for a precise
+  tool name/param.
+- [`reference/operating-notes.md`](./reference/operating-notes.md) — gotchas for the newer /
+  less-obvious surface: Neural-Engine extras that return `False` (not an error), gallery
+  stills needing the panel visible, color-managed-only input color space, the no-transition-
+  object hybrid, the `ofx.` prefix + `MediaOut1` splice, BezierSpline-first keyframing,
+  read-only node graphs, Studio-18.5-gated cloud projects, `quit_resolve` terminating the
+  app. Skim it before driving those tools.
 
 ## Safety & judgement
 - **`execute_resolve_code` runs arbitrary Python** in Resolve (namespace: `resolve`,
@@ -170,14 +108,35 @@ Full names/actions: [`reference/tool-catalog.md`](./reference/tool-catalog.md).
 - **Don't fabricate results.** Relay `Error:` / "no active timeline" strings and fix the
   precondition instead of pretending success.
 
+## Offline tools (operate on Resolve FILES + a local SQLite store — **no Resolve needed**)
+These 18 action-dispatch tools each take an `action` param + typed args and work with **no
+running Resolve** (cloud or local). They read/write Resolve's own files and a local DB.
+**Grade/file WRITE actions return `"verified": false`** — structurally valid but not yet
+calibrated against a live Resolve panel, so tell the user that before they rely on a written
+`.drx`/`.drp`.
+- **Files**: `drx` (color grades — inspect/decode/export-CDL/attach-LUT/write), `drt`
+  (timelines — parse/author/validate/inject/extract), `drp` (projects — read/author/edit),
+  `offline_fusion` (comps).
+- **Project intelligence**: `project_read` (lint / clip queries), `project_db`
+  (index + `relayout_node_graphs` — tidy node layout, grade bytes preserved),
+  `conform` (relink QC + lineage), `color_trace` (carry grades across a re-conform),
+  `editorial` (changelist / integrity), `media_ingest` (scan → manifest).
+- **Grade/QC compute**: via `drx` actions and the grading cores (CDL ops, white-balance,
+  skin-match, broadcast-legal/gamut `qc`), `deliverable` (compliance QC), `offline_ref`.
+- **Orchestration**: `pipeline` (DB-as-truth: YAML/JSON spec → SQLite → staged runs with
+  gates + provenance + intent-vs-actual drift), `provenance` (audit / episode report),
+  `capabilities` (what's available + dep status + verified/unverified state).
+Full names/actions: [`reference/tool-catalog.md`](./reference/tool-catalog.md).
+
 ## Quick recipes
 - **Subtitles from audio**: active timeline → `create_subtitles_from_audio` (Studio) or
   local `transcribe_and_add_subtitles` / `export_srt` then import as a subtitle track.
-- **Vertical (9:16) reframe**: `smart_reframe` (Studio) or `set_timeline_item_property`
-  (Pan/Tilt/ZoomX/ZoomY) on the item.
+- **Vertical (9:16) reframe**: `smart_reframe` (Studio) or `set_transform`
+  (`zoom_x`/`zoom_y`/`pan`) on the item.
 - **Grade a clip**: `open_page('color')` → `get_node_graph` → `set_cdl`/`set_lut` →
   `grab_still`.
-- **Render H.264**: `set_render_settings` (format `mp4`, codec `H.264`, `TargetDir`,
-  `CustomName`) → `add_render_job` → `start_rendering` → poll `get_render_job_status`.
+- **Render H.264**: `set_render_format_and_codec` (format `mp4`, codec `H.264`) →
+  `set_render_settings` (`TargetDir`, `CustomName`) → `add_render_job` → `start_rendering`
+  → poll `get_render_job_status`.
 - **"What's on the timeline?"**: `get_current_timeline_info` + `get_timeline_items` +
   `screenshot`.
