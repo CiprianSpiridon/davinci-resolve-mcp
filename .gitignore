@@ -32,13 +32,14 @@ htmlcov/
 !.claude/skills/
 .claude/skills/*
 # Ship the symlinks that mirror this project's own skills into the Claude Code
-# skills dir (canonical sources are the root-level davinci-resolve* skill dirs).
+# skills directory (canonical sources live under skills/).
 !.claude/skills/davinci-resolve
 !.claude/skills/davinci-resolve-remove-silences-bad-takes-and-umms
 !.claude/skills/davinci-resolve-use-plugins
 !.claude/skills/davinci-resolve-generate-plugin-list
 skills-lock.json
 # Local examples
+examples/
 
 # Local Ulpi artifacts
 .ulpi/
