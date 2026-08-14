@@ -2,11 +2,7 @@
 davinci_resolve_mcp.grading.skin_match — within/cross-camera skin-tone match
 (v2 "skin-line" metric).
 
-``skin-match.mjs`` (the Kovac RGB skin gate + per-clip skin mean) and
-``match-to-reference.mjs`` (the luma-preserving "chroma" affine match, v2).
-
-The reference reads rendered PNG frames via the optional ``sharp`` dependency,
-gates every pixel with the classic Kovac RGB rule, and averages the pixels
+The matcher gates pixels with the classic Kovac RGB rule and averages those
 that pass. This codebase's offline layer has no image-decode pipeline (see
 :mod:`davinci_resolve_mcp.grading.cdl_ops`, :mod:`davinci_resolve_mcp.grading.white_balance`),
 so this module instead accepts a caller-supplied list of raw RGB pixel
@@ -14,7 +10,7 @@ so this module instead accepts a caller-supplied list of raw RGB pixel
 flattened to ``[{r,g,b}, ...]`` — and performs the same gate + mean in pure
 Python. Frame extraction/sampling and grade APPLY remain the caller's job.
 
-Two match metrics, mirroring the reference:
+Two match metrics are available:
 
   * ``"mean"`` (legacy v1) — match the source clip's skin-gated mean RGB
     exactly to the reference's skin-gated mean RGB. Simple, but drags a
@@ -26,7 +22,7 @@ Two match metrics, mirroring the reference:
     direction across cameras/framings without altering how bright the face
     already reads.
 
-COLOR-SPACE CAVEAT (unchanged from the reference): the skin gate assumes
+COLOR-SPACE CAVEAT: the skin gate assumes
 display-referred samples (Rec.709 / sRGB). Log samples (SLog3 etc.) are flat
 and desaturated, so almost nothing passes the gate — :func:`skin_stats`
 raises a clear error rather than silently averaging zero pixels into NaN.
@@ -52,8 +48,7 @@ _CHANNELS = ("r", "g", "b")
 _LUMA_WEIGHTS: dict[str, float] = {"r": 0.2126, "g": 0.7152, "b": 0.0722}
 
 # Canonical vectorscope skin-line angle (Rec.709 full-range chroma,
-# atan2(cr, cb)), same convention as the reference's scope-read.mjs /
-# skin-match.mjs.
+# atan2(cr, cb)).
 _SKIN_LINE_DEG = 123.0
 
 # Classic Kovac RGB skin-rule defaults (8-bit-scale channels), literature
@@ -169,7 +164,6 @@ def is_skin(r: float, g: float, b: float, **opts: float) -> bool:
     Classic Kovac RGB skin-tone rule for uniform daylight, on 8-bit-scale
     channels. Conservative by design: better to gate out a borderline pixel
     than to admit a background pixel that drags the skin mean off target.
-
     Params:
       r, g, b: channel values (0..255 scale by default; the rule's
         thresholds assume that scale — pass matching `min_*`/`min_spread`/

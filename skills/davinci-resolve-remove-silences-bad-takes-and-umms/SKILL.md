@@ -1,6 +1,5 @@
 ---
 name: davinci-resolve-remove-silences-bad-takes-and-umms
-version: 1.0.0
 description: >-
   First-pass editorial hygiene for a DaVinci Resolve timeline: remove dead-air silences,
   filler-only cues (um/uh/okay/so), non-speech markers, and verbatim retakes / false starts —
@@ -10,12 +9,6 @@ description: >-
   (there is no razor/ripple tool in the scripting API). Use when the user asks to "rough cut",
   "tighten", "clean up", "remove dead air / pauses / silences / umms / filler words / retakes /
   false starts / bad takes" on a video or timeline in DaVinci Resolve.
-when_to_use: >-
-  Trigger when the user wants a first editorial-hygiene pass on a Resolve clip/timeline — remove
-  silences, filler words (um/uh), interjections, and bad takes / false starts. Requires DaVinci
-  Resolve Studio 19+ (native transcription) and ffmpeg. Builds a new timeline; never edits the
-  original. For general Resolve operation see the base `davinci-resolve` skill.
-argument-hint: "[source .mp4/.mov or open timeline] [optional: aggressive | keep long demos]"
 ---
 
 # Remove silences, bad takes & umms (DaVinci Resolve)

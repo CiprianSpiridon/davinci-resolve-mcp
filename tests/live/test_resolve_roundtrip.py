@@ -3,8 +3,7 @@ tests/live/test_resolve_roundtrip.py — live-calibration round-trip harness
 (TASK-038: DEFERRED-until-Resolve verification).
 
 The OFFLINE/advanced tool set (``formats/``, ``store/``, ``grading/``,
-``tools/off_*.py``) was built entirely from reverse-engineered file formats
-``.drx`` fixtures in ``tests/fixtures/drx/``) and validated *offline* — every
+``tools/off_*.py``) is validated *offline* — every
 write action ships with a ``"verified": false`` field because nothing in
 this repo's test suite has ever driven a running copy of DaVinci Resolve.
 

@@ -13,6 +13,7 @@ timeline Resolve conforms/retimes the clip, which breaks frame-accurate cutting
 
 ## 2. There is NO razor / split / ripple-delete tool — rebuild instead
 The Resolve **scripting API has no** `SplitClip`/`RazorClip`/`RippleDelete`
+(local probes record `Timeline.SplitClip` as *unsupported*). So you cannot
 "cut and delete" on a timeline via script. The pipeline **rebuilds**: it appends
 only the KEEP sub-ranges of the source to a fresh timeline via
 `mediaPool.AppendToTimeline([{mediaPoolItem, startFrame, endFrame}, ...])`. This

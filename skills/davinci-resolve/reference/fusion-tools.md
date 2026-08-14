@@ -367,6 +367,7 @@ Our server has **no `GetRegList`** surface. Use these instead:
 |--------------|-----|----------------|
 | The **inputs** (`INPS_ID` / name / data type) a tool accepts | `fusion_list_inputs(tool_name, comp_index=1, …)` | yes (tool must exist in a comp) |
 | A **live tool's ground-truth RegID** (`TOOLS_RegID`) | `discover_regid(tool_name="")` — opens the Fusion page, reads `GetAttrs()['TOOLS_RegID']`; empty name = active tool. For OFX it also returns the `ofx.`-stripped `wireId` | yes (Fusion page open) |
+| The **ResolveFX catalog** (name + `wireId` + full `ofx.` RegID) | `get_resolvefx_registry()` — serves the packaged `resolvefx-registry.json` | no |
 | **Installed OFX bundles** on disk | `enumerate_ofx()` — scans the OFX/Plugins dirs for `*.ofx.bundle` | no |
 | **Insertable Fusion titles/generators** on disk | `enumerate_templates(scope="all"\|"shipped"\|"user")` | no |
 

@@ -1,6 +1,5 @@
 ---
 name: davinci-resolve-generate-plugin-list
-version: 1.0.0
 description: >-
   Index every usable DaVinci Resolve plugin/effect/template installed on this machine —
   ResolveFX/OFX effects, third-party OFX bundles, and Fusion template packs (titles, lower-thirds,
@@ -9,11 +8,6 @@ description: >-
   project-memory pointer, so Claude knows what's available without re-scanning. Use when the user
   wants to catalog / index / "generate a list of" their Resolve plugins, or after installing new
   packs. The davinci-resolve-use-plugins skill consumes this TOC.
-when_to_use: >-
-  Trigger when the user wants to build or refresh an index/TOC of installed DaVinci Resolve
-  plugins/effects/templates, make Claude aware of what's available, or after installing new
-  MotionVFX / .drfx / OFX packs. Run once per machine (or after installs), not per edit.
-argument-hint: "[optional: path to root CLAUDE.md, defaults to ./CLAUDE.md]"
 ---
 
 # Generate the DaVinci Resolve plugin TOC

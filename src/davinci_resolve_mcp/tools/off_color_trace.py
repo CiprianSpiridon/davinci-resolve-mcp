@@ -41,9 +41,9 @@ error.
 
 This is a thin dispatch/IO layer over :mod:`davinci_resolve_mcp.formats.drp`,
 :mod:`davinci_resolve_mcp.formats.drt`, and
-``color_trace.mjs`` match-engine (read for shape, not copied: this module is
-original Python) — it does not reimplement ZIP/XML/SeqContainer/protobuf
-parsing itself, it only resolves file paths, calls into the formats layer,
+:mod:`davinci_resolve_mcp.formats.drx_codec`. It does not reimplement
+ZIP/XML/SeqContainer/protobuf parsing itself; it only resolves file paths,
+calls into the formats layer,
 matches clips, and shapes JSON responses / a minimal ``.drx`` envelope.
 
 This module NEVER connects to DaVinci Resolve: no ``DaVinciResolveScript``

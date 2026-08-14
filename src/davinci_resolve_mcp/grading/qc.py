@@ -3,15 +3,10 @@ davinci_resolve_mcp.grading.qc — offline scopes, gamut/broadcast-legal QC,
 verify-grade, and match-to-reference orchestration.
 
 Pure math on caller-supplied numbers — no file I/O, no image decoding, no
-server/``: ``gamut-legal.mjs`` (broadcast-legal / clipping QC over rendered
-PNG pixels via the optional ``sharp`` dependency), ``qc-frame.mjs`` (scope/
-frame QC orchestration) and ``match-to-reference.mjs`` (affine mean/std
-"Reinhard-lite" color match toward a hero reference). This codebase's
-offline layer has no image-decode pipeline, so every function here operates
+DaVinci Resolve connection. This codebase's offline layer has no image-decode pipeline, so every function here operates
 on plain numeric samples/statistics the caller has already extracted
 (sampled RGB pixels, or pre-measured per-channel mean/std) rather than
-decoding image files itself — exactly the sampling-is-injected contract the
-reference modules use for their pure-comparison cores.
+decoding image files itself.
 
 Four building blocks:
 
@@ -20,13 +15,11 @@ Four building blocks:
       list of sampled RGB pixels. The scope-read half of a QC pass.
     * :func:`broadcast_legal`   — flags out-of-gamut / illegal levels
       against a named broadcast standard, with full per-sample detail
-      (mirrors ``gamut-legal.mjs``'s ``measureLegal``/``computeGamutLegal``).
     * :func:`verify_grade`      — compares an *intended* grade parameter set
       against a *decoded* one (e.g. the output of
       :func:`~davinci_resolve_mcp.formats.drx_codec.decode_fields`) and
       reports a per-param diff plus an overall pass/fail.
-    * :func:`match_to_reference` — the affine mean/std color match from
-      ``match-to-reference.mjs``, operating on pre-measured per-channel
+    * :func:`match_to_reference` — an affine mean/std color match operating on pre-measured per-channel
       mean/std statistics instead of decoding pixels itself.
 
 All "grade" outputs (``match_to_reference``; the grade side of
@@ -57,7 +50,7 @@ __all__ = [
 _CHANNELS = ("r", "g", "b")
 
 # BT.709 luma weights — used for the luma scope readout, and for the
-# luma-preserve step of match_to_reference (mirrors match-to-reference.mjs).
+# luma-preserve step of match_to_reference.
 _LUMA_WEIGHTS = (0.2126, 0.7152, 0.0722)
 
 # Below this magnitude a denominator is treated as "zero" for division-guard
@@ -70,7 +63,7 @@ _EPS = 1e-9
 # Each entry's "low"/"high" are fractions of full-scale (0..1) so they are
 # independent of the caller's sample scale (8-bit 0..255, or normalized
 # 0..1 — see the `scale` parameter on broadcast_legal). Values mirror
-# gamut-legal.mjs's default 8-bit legal range (16-235/255).
+# the conventional default 8-bit legal range (16-235/255).
 # ---------------------------------------------------------------------------
 BROADCAST_STANDARDS: dict[str, dict[str, Any]] = {
     "rec709": {
@@ -256,10 +249,9 @@ def broadcast_legal(
         "b":..}`` (an optional ``"id"`` key is echoed back per-sample) or
         ``[r, g, b]``.
       standard: one of :func:`list_broadcast_standards` (default "rec709",
-        8-bit 16-235 — matches gamut-legal.mjs's default).
+        8-bit 16-235).
       max_illegal_pct: tolerance — the % of samples allowed to sit outside
-        legal range before the overall result fails (default 1.0%, matching
-        ``computeGamutLegal``'s default ``maxIllegalPct``).
+        legal range before the overall result fails (default 1.0%).
       scale: the samples' full-scale value (255.0 default; pass 1.0 for
         normalized float samples). The standard's legal low/high are
         fractions of this scale.
@@ -553,29 +545,26 @@ def match_to_reference(
 ) -> dict[str, Any]:
     """
     Affine mean/std ("Reinhard-lite") color match: move `target`'s sampled
-    statistics toward `reference`'s, as a gain+offset CDL. Mirrors
-    ``match-to-reference.mjs``'s ``computeMatchToReference``, but takes
+    statistics toward `reference`'s, as a gain+offset CDL. It takes
     already-measured per-channel mean/std (this module never samples pixels
     itself — see :func:`read_scopes` / the caller's own frame sampling for
     that half of the pipeline).
 
     Params:
       target / reference: ``{"mean": {"r":..,"g":..,"b":..}, "std": {...}}``,
-        each channel normalized 0..1 (the shape ``measureMeanStd`` produces
-        in the reference — a target patch/frame to correct, and the hero
-        reference to match toward).
-      luma_preserve: when True (default, matching the reference), the
+        each channel normalized 0..1 (a target patch/frame to correct and the
+        hero reference to match toward).
+      luma_preserve: when True (default), the
         per-channel affine is followed by a uniform offset shift so the
         transformed luma equals `target`'s own (BT.709-weighted) mean luma —
         a chroma/look match, not an exposure move.
       clamp_gain: (lo, hi) bound on the per-channel multiplicative gain
-        (``std_ref / std_target``); default ``[0.5, 2]`` matches the reference.
+        (``std_ref / std_target``); default ``[0.5, 2]``.
       clamp_offset: (lo, hi) bound on the per-channel additive offset;
-        default ``[-0.5, 0.5]`` matches the reference.
+        default ``[-0.5, 0.5]``.
       warn_threshold: correction magnitude (max over channels of
         ``max(|gain-1|, |offset|)``) above which a "large correction" warning
-        is added — default 0.35, matching the reference's over-correction
-        guard.
+        is added — default 0.35.
 
     Returns:
       {

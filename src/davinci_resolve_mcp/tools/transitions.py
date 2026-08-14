@@ -8,9 +8,8 @@ three delivery strategies behind five thin ``@mcp.tool()`` functions:
   :mod:`davinci_resolve_mcp.formats.transitions` and writes a byte-patched
   archive. No Resolve is touched; the geometry (centred dissolve straddling
   the cut, half-duration in/out offsets, handle-media precondition) is the
-  one ported in the formats layer from
-  (``aaf_transition`` — only ``SMPTE_Dissolve`` is supported and the dissolve
-  straddles the edit with handle media on both sides).
+  one enforced in the formats layer: only ``SMPTE_Dissolve`` is supported,
+  the dissolve straddles the edit, and both sides must provide handle media.
 - Interchange authoring (``author_transition_interchange`` /
   ``author_audio_crossfade_interchange``) — writes an *importable* timeline
   file (OpenTimelineIO ``.otio`` by default, or FCPXML/EDL) carrying dissolves

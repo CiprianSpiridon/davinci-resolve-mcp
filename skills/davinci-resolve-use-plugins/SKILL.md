@@ -1,6 +1,5 @@
 ---
 name: davinci-resolve-use-plugins
-version: 1.2.0
 description: >-
   Discover and USE every plugin/effect/template on this machine in DaVinci Resolve via the
   davinci-resolve MCP: built-in ResolveFX/OFX effects applied to a clip, and installed Fusion
@@ -10,13 +9,6 @@ description: >-
   generator, 1 = effect, 2 = transition) to pick the placement lane. Use when the user wants to add
   an effect/plugin, drop a title/lower-third/intro/chapter card, apply a ResolveFX, place a
   MotionVFX transition, or "use my plugins / MotionVFX / templates" in Resolve.
-when_to_use: >-
-  Trigger when the user wants to apply a ResolveFX/OFX effect, insert a title / lower-third / intro
-  / chapter card / generator, apply a MotionVFX effect template, or place a MotionVFX transition —
-  including purchased .drfx packs. Requires DaVinci Resolve Studio running with a project + timeline.
-  Read the pre-built TOC (davinci-plugins.md/.json) first. For general Resolve operation see the base
-  `davinci-resolve` skill.
-argument-hint: "[e.g. 'add a vignette to clip 3' | 'drop an intro title' | 'apply mAntique Cracked to clip 5' | 'put a MotionVFX transition on that cut']"
 ---
 
 # Use plugins, effects & template packs (DaVinci Resolve)

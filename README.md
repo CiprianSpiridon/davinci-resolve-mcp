@@ -1,11 +1,15 @@
 # davinci-resolve-mcp
 
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-server-6f42c1)](https://modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+
 A full-coverage [Model Context Protocol](https://modelcontextprotocol.io) server for
 **DaVinci Resolve Studio** — control editing, media management, color grading, Fusion
 compositing, Fairlight audio, AI/Neural Engine features, and rendering from any MCP
 client (Claude Desktop, Cursor, or your own agent).
 
-326 tools — **308 live** tools across 22 domain modules that drive a running Resolve
+334 tools — **316 live** tools across 22 domain modules that drive a running Resolve
 instance via its scripting API, plus **18 offline** tools that read/write Resolve's own
 files (`.drp`/`.drt`/`.drx`) and a local SQLite store with **no Resolve connection at
 all**. One server, one process, one `mcp = FastMCP(...)` instance — every tool connects
@@ -14,16 +18,24 @@ lazily (live tools) or touches only local files (offline tools), on first call.
 ## Table of contents
 
 - [What & why](#what--why)
+- [Highlights](#highlights)
 - [Architecture](#architecture)
 - [Tool catalog](#tool-catalog)
 - [Offline (no-Resolve) tools](#offline-no-resolve-tools)
+- [Requirements & compatibility](#requirements--compatibility)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage with Claude Desktop](#usage-with-claude-desktop)
 - [Usage with Cursor](#usage-with-cursor)
+- [Example prompts](#example-prompts)
 - [Agent skill (Claude Code, Cowork, and more)](#agent-skill-claude-code-cowork-and-more)
 - [Claude Code / Cowork plugin](#claude-code--cowork-plugin)
+- [Safety](#safety)
+- [Troubleshooting](#troubleshooting)
 - [Development & validation](#development--validation)
+- [Contributing](#contributing)
+- [Support & security](#support--security)
+- [Project status](#project-status)
 - [License](#license)
 
 ## What & why
@@ -36,8 +48,7 @@ binding for Node.js, Go, Rust, or any other runtime. Any non-Python MCP server w
 have to spawn a Python subprocess and shuttle every call across a bridge anyway — an
 extra process, an extra serialization boundary, and an extra failure mode for zero
 benefit. Python is therefore not just *a* reasonable choice, it is the **strictly
-simpler and more direct** one, and it's what every serious project in this space uses
-are Python).
+simpler and more direct** one for this server.
 
 This server aims for **full API coverage**: every major Resolve scripting object
 (Project, ProjectManager, MediaPool, MediaPoolItem, MediaStorage, Timeline,
@@ -61,6 +72,21 @@ Design priorities, in order:
 3. **One tool, one job, one clear docstring.** Tool names are globally unique and each
    docstring documents its parameters — that docstring is the only description an LLM
    client sees when deciding whether and how to call the tool.
+
+## Highlights
+
+- **Broad Resolve control:** projects, bins, media, timelines, Inspector properties,
+  Color, Fusion, Fairlight, Neural Engine features, gallery stills, effects, transitions,
+  keyframes, and the render queue.
+- **Works with standard MCP clients:** the server uses stdio transport and ships setup
+  paths for Claude Desktop, Claude Code, Cowork, Cursor, Windsurf, and manual clients.
+- **Useful without Resolve running:** 18 offline tools inspect or author Resolve project,
+  timeline, grade, and composition formats; run media QC; and maintain a local SQLite
+  workflow ledger.
+- **Failure-aware:** live connections are lazy, tool failures return readable strings,
+  and mutating offline actions identify results that still need live Resolve validation.
+- **Extensible:** tool modules share one FastMCP instance, keep names globally unique,
+  and are covered by connection-free registration tests.
 
 ## Architecture
 
@@ -87,10 +113,11 @@ src/davinci_resolve_mcp/
 │                      # white_balance, skin_match, qc (broadcast-legal/gamut)
 └── tools/              # one module per Resolve API domain — see catalog below
     ├── ai.py, audio.py, code.py, color.py, export_still.py, fusion.py,
-    ├── media_pool.py, media_pool_item.py, media_storage.py, project.py,
-    ├── project_manager.py, render.py, resolve_app.py, screenshot.py,
-    ├── timeline.py, timeline_edit.py, timeline_item.py, transcription.py,
-    └── off_*.py           # 18 offline tools — see "Offline (no-Resolve) tools"
+    ├── fx_plugins.py, inspector.py, keyframes.py, media_pool.py,
+    ├── media_pool_item.py, media_storage.py, project.py, project_manager.py,
+    ├── render.py, resolve_app.py, screenshot.py, timeline.py,
+    ├── timeline_edit.py, timeline_item.py, transcription.py, transitions.py,
+    └── off_*.py        # 18 offline tools — see "Offline (no-Resolve) tools"
 ```
 
 **The rules that keep this architecture sound:**
@@ -125,8 +152,8 @@ src/davinci_resolve_mcp/
 
 ## Tool catalog
 
-**326 tools total** (verified by `tests/test_tool_exposure.py`, which imports the whole
-server with no Resolve instance present and asserts on `mcp.list_tools()`): **308 live**
+**334 tools total** (verified by `tests/test_tool_exposure.py`, which imports the whole
+server with no Resolve instance present and asserts on `mcp.list_tools()`): **316 live**
 tools across the 22 domain modules below, driving a running Resolve instance, plus **18
 offline** tools (covered in the [next section](#offline-no-resolve-tools)) that never
 touch Resolve at all. Also 3 read-only MCP resources and 1 prompt.
@@ -134,7 +161,7 @@ touch Resolve at all. Also 3 read-only MCP resources and 1 prompt.
 | Module | Domain | Tools |
 |---|---|---:|
 | `tools/color.py` | Color page — node graph, LUT get/set, CDL, grade-from-DRX, color versions, gallery stills | 42 |
-| `tools/media_pool_item.py` | `MediaPoolItem` — clip properties/metadata, markers, flags, clip color, proxy media, mark in/out | 29 |
+| `tools/media_pool_item.py` | `MediaPoolItem` — clip properties/metadata, markers, flags, clip color, proxy media, mark in/out | 30 |
 | `tools/timeline.py` | Timeline — read/navigate/structure: list & switch timelines, duplicate, settings, tracks, timecode, item listing, markers | 27 |
 | `tools/media_pool.py` | `MediaPool` — bin/folder tree, media & timeline import, move/delete/relink/unlink, timeline creation | 25 |
 | `tools/render.py` | Render/Deliver — formats/codecs/presets, render settings, render-queue management, job status | 24 |
@@ -144,18 +171,18 @@ touch Resolve at all. Also 3 read-only MCP resources and 1 prompt.
 | `tools/fusion.py` | Fusion comp management on timeline items — list/add/import/export/load/delete/rename | 16 |
 | `tools/timeline_edit.py` | Timeline mutation — insert/append/delete/move edits, scene-cut detection | 12 |
 | `tools/audio.py` | Audio / Fairlight — voice isolation, audio-specific track tools | 10 |
-| `tools/fx_plugins.py` | OFX / FX plugins — apply, configure, and manage effects on timeline items | 12 |
+| `tools/fx_plugins.py` | OFX / FX plugins — apply, configure, cache, classify, and animate effects/templates | 18 |
 | `tools/project.py` | Project info & settings — summary, get/set settings, name, supported render resolutions | 10 |
 | `tools/inspector.py` | Inspector — timeline-item property inspection and editing | 8 |
 | `tools/media_storage.py` | `MediaStorage` — mounted-volume browsing, add-to-media-pool | 7 |
 | `tools/ai.py` | AI / Neural Engine — Magic Mask, Smart Reframe, Stabilize, AI subtitles | 6 |
 | `tools/transcription.py` | Local speech-to-text (mlx-whisper / openai-whisper) | 6 |
-| `tools/transitions.py` | Transitions — add/remove/configure timeline transitions | 5 |
+| `tools/transitions.py` | Transitions — author/place native, MotionVFX, and default timeline transitions | 6 |
 | `tools/keyframes.py` | Keyframes — read/set/delete animation keyframes on timeline items | 4 |
 | `tools/export_still.py` | Timeline export, current-frame still export, clip thumbnail grab | 3 |
 | `tools/code.py` | `execute_resolve_code` — arbitrary-snippet escape hatch for uncovered API surface | 1 |
 | `tools/screenshot.py` | Screenshot of the running Resolve UI, returned as an in-band MCP `Image` | 1 |
-| **Total** | | **308** |
+| **Total** | | **316** |
 
 Plus:
 - **3 read-only resources** (`resources.py`): `resolve://project/info`,
@@ -164,7 +191,7 @@ Plus:
   driving Resolve through this tool surface.
 
 Run `./.venv/bin/python -c "from davinci_resolve_mcp.server import mcp; import asyncio; print(len(asyncio.run(mcp.list_tools())))"`
-yourself at any time to re-verify the live count (308 + 18 = 326) — no Resolve
+yourself at any time to re-verify the live count (316 + 18 = 334) — no Resolve
 installation required.
 
 ## Offline (no-Resolve) tools
@@ -230,7 +257,31 @@ tools never reimplement it themselves:
   `./.venv/bin/pip install -e ".[offline]"`; every tool still imports and
   degrades gracefully without them.
 
-studied and reimplemented from scratch in Python.
+These tools are implemented in Python and share the same lazy, single-process
+architecture as the live tool surface.
+
+## Requirements & compatibility
+
+| Component | Requirement |
+|---|---|
+| Python | 3.10 or newer |
+| DaVinci Resolve | A recent version with external scripting enabled; Studio is recommended because some APIs are edition- or version-gated |
+| Operating system | macOS, Windows, or Linux; standard Resolve scripting paths are auto-detected per OS |
+| MCP client | Any client that can launch a local stdio MCP server |
+| Node.js | 18+ only when using the optional `npx` GitHub bootstrapper or skills installer |
+
+The base install includes the MCP runtime. Optional capabilities are grouped so users
+only install what they need:
+
+| Extra | Adds |
+|---|---|
+| `offline` | `zstandard` for compressed DRX payloads and PyYAML for YAML pipeline specs |
+| `transcription` | Local Whisper transcription (`mlx-whisper` on macOS, `openai-whisper` elsewhere) |
+| `screenshot` | `mss` and Pillow for screenshot capture on Windows/Linux; macOS uses its native capture path |
+
+Resolve API availability varies by Resolve version, edition, current page, selected
+object, and project state. Unsupported calls return a readable error instead of taking
+down the server.
 
 ## Installation
 
@@ -268,17 +319,16 @@ pipx install "git+https://github.com/CiprianSpiridon/davinci-resolve-mcp.git"
 davinci-resolve-mcp setup --clients cursor,claude-code
 ```
 
-Or via **npx** (the package is published to npm as a discovery + no-clone installer; the
-server itself is still Python, so you need Python 3.10+ installed):
+Or run the bootstrapper directly from the public GitHub repository with **npx**. The
+server itself is Python, so Python 3.10+ must still be installed:
 
 ```bash
-npx @ciprianspiridon/davinci-resolve-mcp setup       # install + register
-npx @ciprianspiridon/davinci-resolve-mcp doctor      # health check
-# from the repo without npm publish: npx github:CiprianSpiridon/davinci-resolve-mcp setup
+npx github:CiprianSpiridon/davinci-resolve-mcp setup
+npx github:CiprianSpiridon/davinci-resolve-mcp doctor
 ```
 
 After installing, check health any time with **`davinci-resolve-mcp doctor`** (verifies
-all 326 tools — 308 live + 18 offline — register and, if Resolve is running, that a live
+all 334 tools — 316 live + 18 offline — register and, if Resolve is running, that a live
 connection succeeds). The `setup`/`doctor` subcommands are also available on the console script directly
 (`davinci-resolve-mcp setup --clients cursor`).
 
@@ -296,10 +346,14 @@ This installs the `davinci-resolve-mcp` console script (defined in `pyproject.to
 `mcp[cli]` dependency. `requirements.txt` mirrors the same runtime dependencies if you
 prefer `pip install -r requirements.txt`.
 
-Optional local transcription support (Apple Silicon):
+Install optional capabilities as needed:
 
 ```bash
+./.venv/bin/pip install -e ".[offline]"
 ./.venv/bin/pip install -e ".[transcription]"
+./.venv/bin/pip install -e ".[screenshot]"
+# or install every optional group together:
+./.venv/bin/pip install -e ".[offline,transcription,screenshot]"
 ```
 
 ## Configuration
@@ -369,35 +423,52 @@ Cursor reads MCP server configuration from `~/.cursor/mcp.json` (global) or
 Reload the MCP servers list in Cursor's settings (or restart Cursor) after adding this,
 then enable the `davinci-resolve` server for the chat/agent you're using.
 
+## Example prompts
+
+Once the server is connected, ask your MCP client in ordinary language. Good first
+requests are small, observable, and easy to verify:
+
+- “Show me the current project, active timeline, tracks, and playhead timecode.”
+- “Create a bin named `Selects`, import these three files, and report what Resolve accepted.”
+- “List the clips on video track 1, then move the playhead to the start of `Interview A`.”
+- “Read the Inspector transform values for the selected clip; do not change anything.”
+- “Apply a cross dissolve at `01:00:12:00`, then verify the timeline changed.”
+- “Queue the current timeline with the `YouTube 1080p` preset, but do not start rendering.”
+- “Inspect this `.drp` offline and report missing media without opening Resolve.”
+
+For mutating work, ask the agent to inspect first, state the exact target, make one
+change, and verify by reading the resulting Resolve state back.
+
 ## Agent skill (Claude Code, Cowork, and more)
 
-This repo ships a dedicated **agent skill** — the canonical source is the root-level
-[`davinci-resolve/`](./davinci-resolve/) folder (`davinci-resolve/SKILL.md`), mirrored
-into [`.claude/skills/davinci-resolve`](./.claude/skills/) via a symlink so it
-**auto-loads whenever you run Claude Code inside this repository**. It works with any
-agent that loads skills — **Claude Code and Claude Cowork** both read from the same
-`~/.claude/skills/` directory, so a global install lights it up in both.
+This repository ships four canonical agent skills under [`skills/`](./skills/). The
+tracked `.claude/skills/` entries are compatibility symlinks to those same folders, so
+there is only one source of truth per skill.
 
-The skill covers the MCP end to end: **onboarding** (it walks the agent through installing
-and registering the MCP if it isn't configured yet — see
-[`davinci-resolve/reference/setup.md`](./davinci-resolve/reference/setup.md)) and
-**operation** (the orient→act→verify workflow, a tool-map by task, safety around
-destructive/render ops, screenshot discipline, and quick recipes). Its
-[`reference/tool-catalog.md`](./davinci-resolve/reference/tool-catalog.md) is an exact,
-auto-generated list of every tool grouped by module.
+| Skill | Purpose |
+|---|---|
+| [`davinci-resolve`](./skills/davinci-resolve/) | Set up and operate the MCP with an inspect → act → verify workflow |
+| [`davinci-resolve-use-plugins`](./skills/davinci-resolve-use-plugins/) | Apply OFX/ResolveFX and use Fusion titles, generators, and template packs |
+| [`davinci-resolve-generate-plugin-list`](./skills/davinci-resolve-generate-plugin-list/) | Index installed effects and templates into a machine-local catalog |
+| [`davinci-resolve-remove-silences-bad-takes-and-umms`](./skills/davinci-resolve-remove-silences-bad-takes-and-umms/) | Build and verify a non-destructive first-pass editorial cleanup |
 
-**Install it globally** (available in Claude Code, Cowork, and every other agent) with the
-[skills.sh](https://skills.sh) CLI — the repo is discoverable (the skill lives at the repo
-root):
+The base skill includes onboarding and operation guidance, safety around destructive or
+rendering actions, screenshot discipline, recipes, and an exact tool reference at
+[`skills/davinci-resolve/reference/tool-catalog.md`](./skills/davinci-resolve/reference/tool-catalog.md).
+
+**Install them globally** (available in Claude Code, Cowork, and other compatible agents)
+with the [skills.sh](https://skills.sh) CLI:
 
 ```bash
 npx skills add CiprianSpiridon/davinci-resolve-mcp --global --agent '*' -y
 ```
 
-Or copy it into the global skills directory manually (Claude Code + Cowork both read this):
+Or copy the skills into the global skills directory manually (Claude Code and Cowork
+both read this location):
 
 ```bash
-mkdir -p ~/.claude/skills && cp -r davinci-resolve ~/.claude/skills/davinci-resolve
+mkdir -p ~/.claude/skills
+cp -R skills/davinci-resolve* ~/.claude/skills/
 ```
 
 ## Claude Code / Cowork plugin
@@ -422,6 +493,37 @@ on `PATH` for the bundled MCP server to launch — see
 [Installation](#installation) for alternatives if you'd rather manage the venv
 yourself and point a client at the console script directly.
 
+## Safety
+
+This server can make real, immediate changes to Resolve projects and local files.
+
+- Save or back up important projects before broad edits, grade application, relinking,
+  project deletion, render-queue changes, or arbitrary-code execution.
+- Inspect the current project, timeline, target clip, and selected page before mutating
+  them. Prefer one bounded change followed by a readback check.
+- Treat `execute_resolve_code`, `execute_fusion_lua`, project deletion, file-writing
+  offline actions, and `quit_resolve` as high-impact tools.
+- Keep Resolve external scripting set to `Local` unless you intentionally need remote
+  access and understand the network boundary.
+- A mutating offline result with `"verified": false` is structurally validated but has
+  not been confirmed by importing it into a live Resolve session.
+- Never point output paths at the only copy of valuable media or project files.
+
+## Troubleshooting
+
+Run `davinci-resolve-mcp doctor` first. For a gated, phase-by-phase setup and recovery
+flow, use [`INSTALL.md`](./INSTALL.md).
+
+| Symptom | Check |
+|---|---|
+| Client shows no tools | Use the absolute virtualenv executable path, validate the client JSON, and fully restart the client |
+| “Could not connect to DaVinci Resolve” | Start Resolve, open a project, enable **Preferences → General → External scripting using → Local**, then retry |
+| `DaVinciResolveScript` cannot be imported | Set `RESOLVE_SCRIPT_API` and `RESOLVE_SCRIPT_LIB` to the actual Resolve installation paths |
+| One API call is unavailable | Check Resolve version, edition, current page, selected object, and project state; APIs differ across releases |
+| Compressed DRX or YAML action reports a missing package | Install `.[offline]` in the same interpreter your MCP client launches |
+| Local transcription is unavailable | Install `.[transcription]`; model downloads can be large and happen on first use |
+| Logs appear to corrupt MCP output | Logs must go to stderr; do not print diagnostics to stdout from tool or startup code |
+
 ## Development & validation
 
 ```bash
@@ -432,7 +534,7 @@ yourself and point a client at the console script directly.
 `tests/test_tool_exposure.py` imports the full server with **no DaVinci Resolve
 instance present and no network access**, and asserts:
 
-- at least 100 tools are registered (the real count is 326: 308 live + 18 offline —
+- at least 100 tools are registered (the real count is 334: 316 live + 18 offline —
   see the [Tool catalog](#tool-catalog) and [Offline tools](#offline-no-resolve-tools)
   sections above),
 - every tool name is globally unique,
@@ -440,18 +542,48 @@ instance present and no network access**, and asserts:
 - the module-ownership contract holds (e.g. exactly one `detect_scene_cuts`, exactly
   one `grab_still`, no `insert_*` tools registered outside `timeline_edit.py`).
 
-The full implementation plan — every task, its acceptance criteria, and `file:line`
-[`.ulpi/plans/davinci-resolve-mcp-full-coverage.json`](./.ulpi/plans/davinci-resolve-mcp-full-coverage.json)
-(and its human-readable companion,
-[`.ulpi/plans/davinci-resolve-mcp-full-coverage.md`](./.ulpi/plans/davinci-resolve-mcp-full-coverage.md)).
+The test suite is designed to collect and run without Resolve. Live integration tests
+under `tests/live/` are separately marked and skip when a Resolve session is not
+available.
 
+## Contributing
 
-detail, including what specifically was studied from each and `file:line` references,
-inside their folders).
+Issues and pull requests are welcome once the repository is public.
 
-|---|---:|---|---|
+1. Open an issue for substantial changes so scope and Resolve-version behavior can be
+   agreed before implementation.
+2. Create a focused branch and virtual environment.
+3. Install the project plus the optional extras needed by the changed surface.
+4. Add or update tests that run without Resolve whenever possible.
+5. Run `python -m pytest -q` and `git diff --check` before opening a pull request.
 
-research.
+When adding a tool, keep the repository contracts intact: register against the single
+`mcp` instance, connect lazily through the shared helpers, give the tool a unique name
+and complete docstring, catch runtime failures at the tool boundary, and update the
+tool catalog/counts. Keep machine-generated catalogs, local media, caches, and personal
+workflow state out of commits.
+
+## Support & security
+
+- Use **GitHub Issues** for reproducible bugs and feature requests. Include OS, Python
+  version, Resolve version/edition, MCP client, the tool name, and sanitized stderr.
+- Use **GitHub Discussions** for setup questions, workflows, and design proposals.
+- Do not post credentials, project databases, customer media, or private project paths.
+- For a suspected vulnerability, use GitHub's private vulnerability reporting from the
+  repository **Security** tab when available. If it is unavailable, contact the
+  maintainer privately through their GitHub profile before public disclosure.
+
+## Project status
+
+The package is currently version `1.0.0`. The registered surface is tested offline on
+every run, while live behavior necessarily depends on the installed Resolve release and
+the active project. Public releases should document supported Resolve versions and any
+known edition-specific limitations.
 
 ## License
 
+[MIT](./LICENSE).
+
+This is an independent, unofficial project and is not affiliated with or endorsed by
+Blackmagic Design. DaVinci Resolve, Fusion, Fairlight, and related product names belong
+to their respective owners.

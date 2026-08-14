@@ -20,9 +20,7 @@ actions:
     new / missing / changed / unchanged files by content hash — useful for
     detecting what changed on a card/drive since the last ingest.
 
-(``server/media-inventory.mjs`` — read here for the ffprobe-normalisation
-shape, not copied: this module is original Python) but is deliberately
-narrower in scope: it is a *front-end ingest* tool (hashes/specs -> the
+This is deliberately narrow in scope: it is a *front-end ingest* tool (hashes/specs -> the
 local DB-as-truth store), not the sync/consistency-report tool.
 
 Media spec probing (fps/codec/resolution/colour/duration) uses the optional

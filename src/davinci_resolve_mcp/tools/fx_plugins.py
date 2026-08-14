@@ -34,6 +34,7 @@ Two families of tool live here:
      Generators as insertable.
    - :func:`enumerate_ofx` filesystem-scans the system and user ``OFX/Plugins``
      dirs for ``*.ofx.bundle`` entries.
+   - :func:`get_resolvefx_registry` loads the packaged
      ``data/resolvefx-registry.json`` via a package-relative path (so it works
      pip-installed) and serves each ResolveFX entry with its ``wireId`` and the
      ``'ofx.' + wireId`` Fusion RegID.
@@ -702,6 +703,7 @@ def _drfx_templates(drfx_path: str) -> List[Tuple[str, str]]:
 
 
 def _registry_json_path() -> str:
+    """Absolute path to the packaged ``data/resolvefx-registry.json``.
 
     Resolved via a PACKAGE-RELATIVE path so it works when the package is
     pip-installed (never a cwd-relative path). Prefers
@@ -1962,7 +1964,9 @@ def classify_timeline_element(
 
 @mcp.tool()
 def get_resolvefx_registry() -> str:
+    """Serve the packaged ResolveFX registry (name + wireId + Fusion RegID).
 
+    Loads ``data/resolvefx-registry.json`` via a package-relative
     path (so it works pip-installed, NOT cwd-relative) and returns one entry per
     ResolveFX plugin. Each entry carries:
     - ``name``   — the registry key (short plugin name);
@@ -1975,11 +1979,13 @@ def get_resolvefx_registry() -> str:
     file (if present) is skipped and surfaced separately under ``meta``.
 
     Returns a JSON object with a ``plugins`` list, or an ``Error: ...`` string
+    when the packaged file is missing or unreadable.
     """
     try:
         path = _registry_json_path()
         if not os.path.isfile(path):
             return (
+                f"Error: packaged ResolveFX registry not found at '{path}'. "
                 f"The data/resolvefx-registry.json file should ship with the "
                 f"package."
             )
@@ -2032,6 +2038,7 @@ def get_resolvefx_registry() -> str:
 def discover_regid(tool_name: str = "") -> str:
     """Read a LIVE Fusion tool's ``TOOLS_RegID`` (ground-truth RegID).
 
+    Unlike :func:`get_resolvefx_registry` (which serves a packaged table with no
     Resolve running), this reads ground truth from a running Resolve: it opens
     the Fusion page (``resolve.OpenPage('fusion')``), gets the current Fusion
     composition, locates a tool, and returns its ``GetAttrs()['TOOLS_RegID']``.
@@ -2155,8 +2162,6 @@ def discover_regid(tool_name: str = "") -> str:
 # a minimal non-empty source guard is all that runs; the follow-up step
 # (refresh_luts for a regular DCTL, a Resolve restart for ACES DCTLs and new
 # Fuses) is reported so the caller knows how to make Resolve pick the file up.
-# 23392, fuse @ 23156) and its utils/platform.get_resolve_plugin_paths.
-
 # A Fuse's on-disk name IS its class identifier — the Fuse SDK requires a valid
 # identifier, and a bad name produces comps that will not reopen.
 _FUSE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")

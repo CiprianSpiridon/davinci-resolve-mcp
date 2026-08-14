@@ -8,7 +8,7 @@ drives that project's pipeline stage-by-stage with gates, provenance, and
 intent-vs-actual drift detection. It composes the storage layer
 (:mod:`davinci_resolve_mcp.store.db` for projects/runs/stages,
 :mod:`davinci_resolve_mcp.store.provenance` for the append-only lineage
-``project-db.mjs``). It never reimplements persistence and never connects to
+ledger) plus a small self-contained spec-compile step. It never reimplements persistence and never connects to
 DaVinci Resolve — it only reads a local spec file and reads/writes a local
 SQLite database.
 
@@ -59,7 +59,7 @@ except Exception:  # pragma: no cover - optional dep absent
 
 _VALID_ACTIONS = ("compile", "run", "status", "report")
 
-# KNOWN_STAGES / gate whitelist). Validation is lenient elsewhere (specs
+# Recognised pipeline stage names + gate kinds. Validation is lenient elsewhere (specs
 # evolve) but strict on these, which have historically failed silently.
 _KNOWN_STAGES = frozenset(
     {
@@ -150,6 +150,7 @@ def _as_dict(doc: Any) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Inheritance / merge
 # ---------------------------------------------------------------------------
 def _is_obj(v: Any) -> bool:
     return isinstance(v, dict)
@@ -256,6 +257,7 @@ def _parent_chain(spec: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Validation
 # ---------------------------------------------------------------------------
 def _normalize_stage(st: Any) -> Dict[str, Any]:
     """Normalise a pipeline entry (string or mapping) to a stage dict."""

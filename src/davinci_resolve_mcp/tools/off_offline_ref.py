@@ -17,8 +17,7 @@ Registers exactly one action-dispatch tool, ``offline_ref``, with two actions:
     tag up and exclude intentionally-graded shots from an automatic
     neutralize/level pass.
 
-Intent-tagging model (mirrors the reference implementation's layered
-design): deterministic per-shot SIGNALS (scope stats, WB/TOD metadata) are
+Intent-tagging model: deterministic per-shot SIGNALS (scope stats, WB/TOD metadata) are
 turned into a human-readable PROPOSAL by the client (the LLM), a human
 RATIFIES it, and only then does the ratified decision become a persisted
 TAG the deterministic tools consume. This module owns only that last step

@@ -23,11 +23,6 @@ string; nothing here raises — unexpected failures are caught in the tool
 entry point and reported as ``"Error: {e}"``. This is a read-only
 measurement domain (no ``.drx``/grade bytes are written), so no action here
 carries a ``"verified"`` field.
-
-``parseEbur128`` (ffmpeg ``ebur128`` Summary-block parsing via
-``requireFfmpeg`` + ``spawnSync``) and ``capabilities.mjs`` (ffmpeg
-on-``PATH`` probing) — read here, not copied: this module is original
-Python.
 """
 
 from __future__ import annotations

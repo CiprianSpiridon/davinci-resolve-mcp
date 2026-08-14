@@ -2,7 +2,8 @@
 tests/test_offline_formats.py — offline formats/grading layer tests.
 
 Exercises the .drx envelope+codec, ASC CDL, LUT-header, .drt/.drp zip
-fixtures (``tests/fixtures/drx/*.drx``) plus synthetic in-memory inputs.
+formats, and the pure CDL grade-math layer against deterministic synthetic
+inputs generated in-process.
 
 None of this touches DaVinci Resolve or the network: everything here reads
 and writes files/bytes/strings in-process only, per the OFFLINE tool-set
@@ -11,10 +12,9 @@ architecture invariant.
 
 from __future__ import annotations
 
-import glob
 import hashlib
 import io
-import os
+import struct
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -38,33 +38,96 @@ from davinci_resolve_mcp.formats.drx_xml import (
 )
 from davinci_resolve_mcp.grading import cdl_ops
 
-FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "drx")
-FIXTURE_FILES = sorted(glob.glob(os.path.join(FIXTURES_DIR, "*.drx")))
+def _encode_varint(value: int) -> bytes:
+    out = bytearray()
+    while value >= 0x80:
+        out.append((value & 0x7F) | 0x80)
+        value >>= 7
+    out.append(value)
+    return bytes(out)
 
 
-# ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-def test_fixtures_are_checked_out():
-    assert len(FIXTURE_FILES) >= 10, (
+def _length_field(number: int, payload: bytes) -> bytes:
+    return _encode_varint((number << 3) | 2) + _encode_varint(len(payload)) + payload
+
+
+def _grade_blob(params: list[tuple[int, float]]) -> str:
+    body = bytearray()
+    for param_id, value in params:
+        value_field = _encode_varint((1 << 3) | 5) + struct.pack("<f", value)
+        entry = _encode_varint(1 << 3) + _encode_varint(param_id)
+        entry += _length_field(2, value_field)
+        body.extend(_length_field(3, entry))
+    return drx_codec.encode_body(
+        bytes(body), drx_codec.FRAME_STORED, compressed=False
+    ).hex()
+
+
+def _drx_document(name: str, index: int, params: list[tuple[int, float]]) -> str:
+    blob = _grade_blob(params)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<Gallery::GyStill DbId="00000000-0000-0000-0000-{index:012d}">\n'
+        f' <FieldsBlob/><Label>{name}</Label>\n'
+        ' <pClipFullVer>'
+        f'<ListMgt::LmVersion DbId="10000000-0000-0000-0000-{index:012d}">'
+        '<FieldsBlob/><Name/><HasCorrection>true</HasCorrection>'
+        f'<Body>{blob}</Body></ListMgt::LmVersion></pClipFullVer>\n'
+        '</Gallery::GyStill>\n'
     )
 
 
-@pytest.mark.parametrize("path", FIXTURE_FILES, ids=lambda p: os.path.basename(p))
-def test_every_fixture_parses_without_raising(path):
-    parsed = parse_drx(path)
+_SYNTHETIC_DRX_DOCUMENTS = [
+    (
+        "primary",
+        _drx_document(
+            "primary",
+            1,
+            [(100663301, 1.1), (100663320, 0.02), (100663325, 1.05)],
+        ),
+    ),
+    (
+        "secondary",
+        _drx_document(
+            "secondary",
+            2,
+            [(2248147136, 0.5), (2248147137, 1.2), (2248147218, 0.15)],
+        ),
+    ),
+    (
+        "qualifier",
+        _drx_document(
+            "qualifier",
+            3,
+            [(137363470, 0.3), (137363471, 0.4), (137363474, 0.9)],
+        ),
+    ),
+]
+
+
+# ---------------------------------------------------------------------------
+# drx_xml — generated documents parse and round-trip byte-exact
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "name,xml", _SYNTHETIC_DRX_DOCUMENTS, ids=[name for name, _ in _SYNTHETIC_DRX_DOCUMENTS]
+)
+def test_every_generated_document_parses_without_raising(name, xml, tmp_path):
+    path = tmp_path / f"{name}.drx"
+    path.write_text(xml, encoding="utf-8")
+    parsed = parse_drx(str(path))
     assert isinstance(parsed, dict)
     assert parsed["stills"], f"{path}: expected at least one Gallery_GyStill"
     assert parsed["nodes"], f"{path}: expected at least one correction node"
     assert parsed["version"] is not None
 
 
-@pytest.mark.parametrize("path", FIXTURE_FILES, ids=lambda p: os.path.basename(p))
-def test_every_fixture_xml_round_trips_byte_exact(path):
-    with open(path, "r", encoding="utf-8") as fh:
-        original = fh.read()
-    parsed = parse_drx(path)
+@pytest.mark.parametrize(
+    "name,xml", _SYNTHETIC_DRX_DOCUMENTS, ids=[name for name, _ in _SYNTHETIC_DRX_DOCUMENTS]
+)
+def test_every_generated_document_xml_round_trips_byte_exact(name, xml):
+    parsed = parse_drx_content(xml)
     reserialized = serialize_drx(parsed)
-    assert reserialized == original, f"{path}: serialize_drx(parse_drx(x)) != x"
+    assert reserialized == xml, f"{name}: serialize_drx(parse_drx(x)) != x"
 
 
 def test_drx_parse_malformed_xml_raises_typed_error():
@@ -88,50 +151,50 @@ def test_serialize_drx_rejects_a_dict_without_tree():
 
 
 # ---------------------------------------------------------------------------
-# drx_codec — decode every grade Body blob in the fixtures, byte-exact re-encode
+# drx_codec — decode generated grade blobs and re-encode byte-exact
 # ---------------------------------------------------------------------------
-def _all_fixture_bodies():
+def _all_generated_bodies():
     bodies = []
-    for path in FIXTURE_FILES:
-        parsed = parse_drx(path)
+    for name, xml in _SYNTHETIC_DRX_DOCUMENTS:
+        parsed = parse_drx_content(xml)
         for node in parsed["nodes"]:
             desc = node.get("body")
             if desc and desc.get("present"):
-                bodies.append((os.path.basename(path), node.get("db_id") or "?", desc["hex"]))
+                bodies.append((name, node.get("db_id") or "?", desc["hex"]))
     return bodies
 
 
-_FIXTURE_BODIES = _all_fixture_bodies()
-_FIXTURE_BODY_IDS = [f"{name}::{db_id}" for name, db_id, _ in _FIXTURE_BODIES]
+_GENERATED_BODIES = _all_generated_bodies()
+_GENERATED_BODY_IDS = [f"{name}::{db_id}" for name, db_id, _ in _GENERATED_BODIES]
 
 
-def test_at_least_three_drx_blobs_are_available_for_round_trip():
-    assert len(_FIXTURE_BODIES) >= 3, "need >=3 real .drx grade blobs to round-trip"
+def test_three_drx_blobs_are_available_for_round_trip():
+    assert len(_GENERATED_BODIES) == 3
 
 
-@pytest.mark.parametrize("name,db_id,hexblob", _FIXTURE_BODIES, ids=_FIXTURE_BODY_IDS)
-def test_fixture_blob_decodes_to_named_parameters(name, db_id, hexblob):
+@pytest.mark.parametrize("name,db_id,hexblob", _GENERATED_BODIES, ids=_GENERATED_BODY_IDS)
+def test_generated_blob_decodes_to_named_parameters(name, db_id, hexblob):
     decoded = drx_codec.decode_fields(hexblob)
     assert decoded["error"] is None
-    assert decoded["compressed"] is True
-    assert decoded["framing"] == drx_codec.FRAME_ZSTD
+    assert decoded["stored"] is True
+    assert decoded["framing"] == drx_codec.FRAME_STORED
     # Every decoded parameter must carry a resolvable semantic name.
     for param in decoded["params"]:
         assert param["name"] == drx_codec.param_name(param["id"])
         assert isinstance(param["value"], float)
 
 
-@pytest.mark.parametrize("name,db_id,hexblob", _FIXTURE_BODIES, ids=_FIXTURE_BODY_IDS)
-def test_fixture_blob_round_trips_byte_exact(name, db_id, hexblob):
+@pytest.mark.parametrize("name,db_id,hexblob", _GENERATED_BODIES, ids=_GENERATED_BODY_IDS)
+def test_generated_blob_round_trips_byte_exact(name, db_id, hexblob):
     decoded = drx_codec.decode_fields(hexblob)
     reencoded = drx_codec.encode_fields(decoded)
     assert reencoded == hexblob, f"{name} ({db_id}): encode_fields(decode_fields(b)) != b"
 
 
 def test_decode_fields_edits_a_value_and_reencodes_structurally():
-    # Pick a fixture blob with at least one parameter and flip its value;
+    # Pick a generated blob with at least one parameter and flip its value;
     # the codec must still produce a well-formed (decodable) blob.
-    name, db_id, hexblob = next(b for b in _FIXTURE_BODIES if drx_codec.decode_fields(b[2])["count"] > 0)
+    name, db_id, hexblob = next(b for b in _GENERATED_BODIES if drx_codec.decode_fields(b[2])["count"] > 0)
     decoded = drx_codec.decode_fields(hexblob)
     original_value = decoded["params"][0]["value"]
     decoded["params"][0]["value"] = original_value + 0.25

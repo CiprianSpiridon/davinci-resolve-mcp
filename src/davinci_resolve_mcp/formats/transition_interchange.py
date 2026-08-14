@@ -12,17 +12,13 @@ Four interchange flavours are supported:
     * :func:`author_dissolve_otio`   — OpenTimelineIO ``.otio`` JSON, one
       ``Transition.1`` (``SMPTE_Dissolve``) per cut, centered with
       ``in_offset``/``out_offset`` each equal to half the dissolve duration.
-      (``buildTransition`` / ``buildTrack``).
+      The in/out offsets each equal half the dissolve duration.
     * :func:`author_dissolve_fcpxml` — Final Cut Pro X ``.fcpxml`` (version 1.9)
       carrying a ``<transition>`` named ``Cross Dissolve``.
     * :func:`author_dissolve_edl`    — CMX3600 ``.edl`` with a classic
       ``D nnn`` dissolve event pair per cut.
     * :func:`author_audio_crossfade` — an OTIO audio-track cross-fade; the track
       ``kind`` is ``Audio`` (inferred from track placement).
-
-The AAF video-transition parameter shape (a centered dissolve authored from a
-pair of neighbouring clips) was cross-checked against
-(``_transition_parameters``).
 
 These are **pure functions** — no ``DaVinciResolveScript`` import, no network,
 no filesystem side effects. Every writer takes a ``cuts`` list, where each cut
@@ -211,6 +207,7 @@ def _clip_start(clip: Dict[str, Any]) -> int:
 # OTIO writers
 # --------------------------------------------------------------------------- #
 def _otio_clip(clip: Dict[str, Any], fps: float) -> Dict[str, Any]:
+    """Build an OTIO ``Clip.2``."""
     start = _clip_start(clip)
     frames = _clip_frames(clip)
     url = clip.get("url")
@@ -243,6 +240,7 @@ def _otio_clip(clip: Dict[str, Any], fps: float) -> Dict[str, Any]:
 
 
 def _otio_transition(dissolve: int, fps: float, transition_type: str = "SMPTE_Dissolve") -> Dict[str, Any]:
+    """Build a centered OTIO ``Transition.1``.
 
     ``in_offset`` and ``out_offset`` are each half the dissolve duration, so the
     transition straddles the cut symmetrically.

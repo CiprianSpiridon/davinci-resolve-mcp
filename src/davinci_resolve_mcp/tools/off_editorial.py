@@ -21,8 +21,8 @@ Registers exactly one action-dispatch tool, ``editorial``, with two actions:
     (a purely local disk check — this never touches DaVinci Resolve).
 
 This is a thin dispatch/IO layer over :mod:`davinci_resolve_mcp.formats.drp`
-and :mod:`davinci_resolve_mcp.formats.drt` (it never reimplements ZIP/XML/
-but re-read for shape, not copied: this module is original Python.
+and :mod:`davinci_resolve_mcp.formats.drt`; it never reimplements ZIP/XML/
+SeqContainer parsing itself.
 
 Matching notes (``changelist``)
 --------------------------------

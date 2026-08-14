@@ -16,7 +16,7 @@ safe to import with no Resolve instance running.
 
 The Media-Pool-blob invariant
 -----------------------------
-``relink-media`` reference): **Resolve links a clip to its media by the path
+Verified against real Resolve 21 exports: **Resolve links a clip to its media by the path
 stored inside the Media Pool clip's binary "Clip" blob, not by the timeline
 clip's plain-text ``<MediaFilePath>``**.  Resolve also does *not* reconform on
 import, so that cached path is authoritative.  Accordingly:

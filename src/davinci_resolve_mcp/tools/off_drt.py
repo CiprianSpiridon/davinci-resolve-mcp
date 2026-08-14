@@ -16,9 +16,9 @@ Registers exactly one action-dispatch tool, ``drt``, with five actions:
   * ``"extract_from_drp"``  — pull one SeqContainer out of a ``.drp`` and
     write it out as a standalone ``.drt``.
 
-This is a thin dispatch/IO layer over :mod:`davinci_resolve_mcp.formats.drt`
-module is original Python) — it does not reimplement ZIP/XML/SeqContainer
-parsing itself, it only resolves file paths, calls into the formats layer,
+This is a thin dispatch/IO layer over :mod:`davinci_resolve_mcp.formats.drt`.
+It does not reimplement ZIP/XML/SeqContainer parsing itself; it only resolves
+file paths, calls into the formats layer,
 and shapes JSON responses.
 
 This module NEVER connects to DaVinci Resolve: no ``DaVinciResolveScript``

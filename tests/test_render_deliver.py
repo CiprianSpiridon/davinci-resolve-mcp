@@ -13,9 +13,9 @@ Two things are checked, mirroring ``tests/test_tool_exposure.py``:
   non-empty description usable by an LLM client.
 - The no-Resolve failure path: calling ``render.quick_export('YouTube')`` and
   ``render.save_render_preset('X')`` with no Resolve reachable returns a
-  ``str`` beginning ``"Error:"`` and raises nothing. This is the ported
-  tools/resolve.py`` — every tool lazily connects inside its body and wraps
-  any connection failure as an ``Error:`` string rather than raising.
+  ``str`` beginning ``"Error:"`` and raises nothing. Every tool lazily
+  connects inside its body and wraps any connection failure as an ``Error:``
+  string rather than raising.
 
 Importing the server must succeed even though Resolve isn't running: all
 Resolve connections are lazy (established only inside a tool call), never at

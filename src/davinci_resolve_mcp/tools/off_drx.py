@@ -27,8 +27,7 @@ This is a thin dispatch/IO layer over
 :mod:`davinci_resolve_mcp.formats.drx_codec`,
 :mod:`davinci_resolve_mcp.formats.cdl`, :mod:`davinci_resolve_mcp.formats.lut`,
 :mod:`davinci_resolve_mcp.grading.cdl_ops` and
-``drx.mjs`` tool (read for the action shape, not copied: this module is
-original Python). It does not reimplement XML/zstd/protobuf parsing, CDL
+:mod:`davinci_resolve_mcp.grading.qc`. It does not reimplement XML/zstd/protobuf parsing, CDL
 XML, LUT header parsing, or grade-math itself — it only resolves file
 paths/JSON payloads, calls into the formats/grading layers, and shapes JSON
 responses.

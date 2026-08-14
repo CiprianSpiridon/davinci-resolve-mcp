@@ -1,14 +1,12 @@
 # `tests/live/` — deferred live-calibration harness
 
 Everything under `tests/` (except this directory) is **offline**: it never
-starts, connects to, or otherwise touches a running copy of DaVinci Resolve
-— see the OFFLINE/advanced tool-set architecture invariant in
-`.ulpi/plans/davinci-resolve-mcp-offline-advanced.json`. That's why every
+starts, connects to, or otherwise touches a running copy of DaVinci Resolve.
+That's why every
 write action in the offline tool set (`drx` `write`/`attach_lut`/`apply_op`,
 `drp` `author`/`edit`, ...) ships with a `"verified": false` field: the
-Node reference
-`.drx` fixtures in `tests/fixtures/drx/`, and validated by re-parsing what
-was written — never by a real Resolve instance.
+`.drx`/`.drp`/`.drt` byte formats are validated by re-parsing what was written
+— never by a real Resolve instance.
 
 This directory is the harness that closes that gap **once a machine with
 DaVinci Resolve installed and running is available**. It cannot run in CI

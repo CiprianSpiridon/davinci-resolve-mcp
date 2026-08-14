@@ -1,21 +1,16 @@
 """
 davinci_resolve_mcp.grading.cdl_ops — pure ASC CDL param-dict grade math.
 
-This module reimplements, as pure/offline functions over CDL param dicts
-(see :mod:`davinci_resolve_mcp.formats.cdl`), the matching heuristics from
-``contrast-normalize.mjs``, ``saturation-match.mjs`` and ``black-balance.mjs``.
-
-The reference implementations measure robust (1st/99th percentile) pixel
-statistics from *rendered PNG frames* (via the optional ``sharp`` dependency)
-and emit a brand-new gain/offset (or saturation) DRX node to correct a clip
-toward a hero/reference. This codebase's offline layer has no image
+This module implements pure/offline matching functions over CDL param dicts
+(see :mod:`davinci_resolve_mcp.formats.cdl`). A full image pipeline would
+measure robust pixel statistics from rendered frames and emit a new
+gain/offset or saturation correction toward a hero/reference. This offline layer has no image
 pipeline, so these functions instead treat an existing CDL param dict's own
 SOP (Slope/Offset/Power) fields as the "measurement": a CDL's *implicit*
 per-channel black point is its ``offset`` and its *implicit* white point is
 ``slope + offset`` (i.e. the value the channel maps to at input 0 and input
 1 respectively, holding ``power`` fixed as an untouched separate gamma
-axis — exactly as the reference never touches gamma/power when matching
-contrast or black point). ``sat`` is used directly as the CDL's saturation
+axis). ``sat`` is used directly as the CDL's saturation
 multiplier for :func:`saturation_match`.
 
 Each function is pure (no I/O, no Resolve), takes one or two CDL param
@@ -115,16 +110,15 @@ def contrast_normalize(
       src: the CDL param dict to correct.
       ref: the "hero"/reference CDL param dict to match toward.
       clamp_gain: (lo, hi) bound on the per-channel multiplicative
-        correction (mirrors contrast-normalize.mjs's default [0.5, 2]).
+        correction (defaults to [0.5, 2]).
       clamp_offset: (lo, hi) bound on the per-channel additive correction
-        (mirrors contrast-normalize.mjs's default [-0.5, 0.5]).
+        (defaults to [-0.5, 0.5]).
 
     For each channel, fits an affine ``scale``/``shift`` so that src's
     implicit black (``src.offset``) and white (``src.offset + src.slope``)
     points land on ref's, then composes that correction onto src's existing
     slope/offset (``power`` and ``sat`` pass through unchanged — this
-    mirrors the reference, which never touches gamma when matching
-    contrast). When src == ref this is the identity (scale=1, shift=0 per
+    leaves gamma unchanged). When src == ref this is the identity (scale=1, shift=0 per
     channel, within the clamp bounds), so no drift is introduced.
 
     Degenerate handling: if src's overall (BT.709-weighted) tonal span is
@@ -220,7 +214,7 @@ def saturation_match(
       src: the CDL param dict to correct.
       ref: the "hero"/reference CDL param dict to match toward.
       clamp_scale: (lo, hi) bound on the multiplicative saturation
-        correction (mirrors saturation-match.mjs's default [0.5, 2]).
+        correction (defaults to [0.5, 2]).
 
     Computes ``scale = clamp(ref.sat / src.sat, *clamp_scale)`` and returns
     src with ``sat`` replaced by ``src.sat * scale`` (``slope``/``offset``/
@@ -285,10 +279,10 @@ def black_balance(
       src: the CDL param dict to correct.
       cast_threshold: minimum spread (max - min implicit black point across
         channels) before a correction is attempted; below this the shadows
-        are already neutral (mirrors black-balance.mjs's default 0.004,
-        ~1/255). No hero/reference is needed — src is self-corrected.
+        are already neutral (defaults to 0.004, ~1/255). No hero/reference is
+        needed — src is self-corrected.
       clamp_offset: (lo, hi) bound on the per-channel additive correction
-        (mirrors black-balance.mjs's default [-0.2, 0.2]).
+        (defaults to [-0.2, 0.2]).
 
     Aligns every channel's implicit black point (``src.offset``, see the
     module docstring) DOWN to the lowest channel's black point — this

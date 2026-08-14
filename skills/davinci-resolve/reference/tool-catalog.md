@@ -1,6 +1,6 @@
 # DaVinci Resolve MCP — full tool reference
 
-Auto-generated from `mcp.list_tools()` — **326 tools** (308 live + 18 offline) across 40 modules.
+Auto-generated from `mcp.list_tools()` — **334 tools** (316 live + 18 offline) across 40 modules.
 
 ## Live tools (drive a running DaVinci Resolve via the scripting API)
 
@@ -48,7 +48,7 @@ Auto-generated from `mcp.list_tools()` — **326 tools** (308 live + 18 offline)
 - **set_node_enabled** — Enable or disable a node in a clip's color node graph.
 - **set_still_label** — Set the label of one still in a gallery still album.
 
-### `tools/media_pool_item.py` (29)
+### `tools/media_pool_item.py` (30)
 - **add_clip_flag** — Add a flag of the given color to a media pool clip.
 - **add_clip_marker** — Add a marker to a media pool clip.
 - **analyze_for_intellisearch** — Run Neural-Engine IntelliSearch analysis on a media pool clip.
@@ -74,6 +74,7 @@ Auto-generated from `mcp.list_tools()` — **326 tools** (308 live + 18 offline)
 - **set_clip_metadata** — Set a metadata field on a media pool clip.
 - **set_clip_property** — Set a property on a media pool clip.
 - **set_input_color_space** — Set the Input Color Space of a media pool clip (color-managed projects only).
+- **set_super_scale** — Set the Super Scale (AI upscale) factor on a media pool clip.
 - **set_third_party_metadata** — Set a third-party metadata field on a media pool clip.
 - **unlink_proxy_media** — Unlink the proxy media file from a media pool clip.
 - **update_clip_marker_custom_data** — Update the custom data string of an existing marker on a media pool clip.
@@ -271,17 +272,24 @@ Auto-generated from `mcp.list_tools()` — **326 tools** (308 live + 18 offline)
 - **set_track_volume** — Set the fader volume (gain) of a whole audio track on the timeline.
 - **set_voice_isolation_state** — Enable/disable Voice Isolation on an audio track (isolate speech from noise).
 
-### `tools/fx_plugins.py` (12)
+### `tools/fx_plugins.py` (18)
 - **append_template_with_placement** — Place a Media Pool item onto a video track with explicit framing.
 - **apply_ofx_to_clip** — Apply an OFX / ResolveFX plugin to a timeline clip via its Fusion comp.
+- **animate_clip_transform** — Animate a Ken Burns or motivated push-in transform on a clip.
+- **apply_clip_effect** — Apply a cached effect comp onto a target clip on its own track.
 - **attach_fusion_comp** — Import a saved Fusion composition onto an existing timeline item.
+- **cache_effect_comp** — Capture a one-MediaIn effect comp from a GUI-placed reference clip.
+- **cache_template_comp** — Capture a correctly wired title/generator Fusion comp for a template.
+- **classify_timeline_element** — Classify a placed timeline element by its Fusion comp's MediaIn count.
 - **discover_regid** — Read a LIVE Fusion tool's ``TOOLS_RegID`` (ground-truth RegID).
 - **enumerate_ofx** — List installed OFX plugin bundles (``*.ofx.bundle``) on this machine.
 - **enumerate_templates** — List Fusion Edit templates (titles/generators/etc.) on this machine.
+- **get_resolvefx_registry** — Serve the packaged ResolveFX registry (name + wireId + Fusion RegID).
 - **get_template_controls** — Read a template's exposed Inspector controls (macro_tool + published input keys) offline.
 - **insert_template_by_name** — Insert a title / generator template at the playhead of the current timeline.
 - **install_dctl** — Write a DCTL source file into Resolve's LUT or ACES Transforms tree.
 - **install_fuse** — Write a Fusion Fuse (.fuse) source file into Fusion's Fuses directory.
+- **place_overlay_title** — Place a title or generator as an overlay on an upper video track.
 - **set_template_fields** — Set several controls (text/color/scale/…) on a placed template in one call.
 
 ### `tools/project.py` (10)
@@ -331,12 +339,13 @@ Auto-generated from `mcp.list_tools()` — **326 tools** (308 live + 18 offline)
 - **transcribe_audio** — Transcribe an audio/video file locally (mlx-whisper on Apple Silicon,
 - **transcribe_clip_audio** — Transcribe a media pool clip's audio using Resolve's own Neural-Engine
 
-### `tools/transitions.py` (5)
+### `tools/transitions.py` (6)
 - **add_default_audio_transition_at_cut** — Add Resolve's default AUDIO cross-fade at a cut via a live keystroke (Shift+T).
 - **add_default_transition_at_cut** — Add Resolve's default VIDEO transition at a cut via a live keystroke (Cmd/Ctrl+T).
 - **author_audio_crossfade_interchange** — Author an importable audio-crossfade timeline file; no live Resolve.
 - **author_transition_interchange** — Author an importable timeline file carrying dissolves; no live Resolve.
 - **place_transition** — Inject a native transition into a ``.drt``/``.drp`` offline; write a byte-patched copy.
+- **place_motionvfx_transition** — Place a named transition into a ``.drt``/``.drp`` offline.
 
 ### `tools/keyframes.py` (4)
 - **add_transform_keyframe** — Add an Edit-page transform keyframe on a timeline item.

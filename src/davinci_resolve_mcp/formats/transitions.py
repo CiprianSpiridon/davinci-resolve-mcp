@@ -25,10 +25,9 @@ A centred SMPTE dissolve of ``duration_frames`` at cut frame ``at_frame``:
     InOffset  = half                        # frames consumed from the outgoing clip
     OutOffset = duration_frames - half      # frames consumed into the incoming clip
 
-The half-duration in/out offsets and the handle-media precondition are adapted
-with ``in_offset`` / ``out_offset`` around a cut) and
-(``aaf_transition`` — only ``SMPTE_Dissolve`` supported, dissolve straddles the
-edit and each side must supply handle media).
+The half-duration in/out offsets keep the dissolve centered on the edit, and
+the handle-media precondition ensures both adjacent clips can supply the
+frames consumed by the transition.
 
 Public API
 ----------

@@ -14,8 +14,8 @@ architecture invariant:
   clip's ``Start`` / ``Duration`` untouched.
 - ``formats.transition_interchange.author_dissolve_otio`` — emits a
   ``json.loads``-parseable OpenTimelineIO ``Transition.1`` of type
-  ``SMPTE_Dissolve`` (schema per
-  ``SMPTE_Dissolve`` is supported, dissolve straddles the edit, per
+  ``SMPTE_Dissolve``; the dissolve straddles the edit and consumes equal
+  handles from the adjacent clips.
 - Tool exposure — the five ``@mcp.tool()`` transition tools are registered,
   globally unique, and each carries a non-empty description.
 
@@ -190,7 +190,7 @@ def test_author_dissolve_otio_emits_parseable_smpte_dissolve():
     assert tr["OTIO_SCHEMA"] == "Transition.1"
     # Only SMPTE_Dissolve is modelled (aaf_writer.py:649).
     assert tr["transition_type"] == "SMPTE_Dissolve"
-    # Centred: in_offset == out_offset == half the dissolve (writer.ts:171).
+    # Centred: in_offset == out_offset == half the dissolve.
     assert tr["in_offset"]["OTIO_SCHEMA"] == "RationalTime.1"
     assert tr["in_offset"]["value"] == _HALF
     assert tr["out_offset"]["value"] == _HALF

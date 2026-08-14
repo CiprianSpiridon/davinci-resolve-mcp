@@ -3,7 +3,7 @@
   "name": "davinci-resolve",
   "displayName": "DaVinci Resolve MCP",
   "version": "1.0.0",
-  "description": "Full-coverage MCP server for DaVinci Resolve Studio: editing, media pool, color grading, Fusion node engine + OFX/effects, transitions, Fairlight, AI/Neural Engine, gallery, rendering, and local transcription (308 live tools) — plus 18 offline/advanced tools that work without Resolve running (.drx/.drt/.drp, CDL/LUT, project DB, provenance). 326 tools total.",
+  "description": "Full-coverage MCP server for DaVinci Resolve Studio: editing, media pool, color grading, Fusion node engine + OFX/effects, transitions, Fairlight, AI/Neural Engine, gallery, rendering, and local transcription (316 live tools) — plus 18 offline/advanced tools that work without Resolve running (.drx/.drt/.drp, CDL/LUT, project DB, provenance). 334 tools total.",
   "author": {
     "name": "davinci-resolve-mcp contributors",
     "email": "contact@ciprianspiridon.com",

@@ -16,10 +16,9 @@ action:
     into the same "plan" response so a caller gets one coherent picture of
     a project's audio state from one call.
 
-``audio_plan.mjs`` / ``vendor/audio-fairlight`` (content-type templates for
-documentary / narrative / podcast / social content, plus coverage and
-EBU/ATSC-style loudness checks) — read here, not copied: this module is
-original Python.
+This is a pure data-transform tool with content-type templates for
+documentary, narrative, podcast, and social content, plus coverage and
+EBU/ATSC-style loudness checks.
 
 This module never connects to DaVinci Resolve and never touches the
 filesystem: it only transforms an in-memory (JSON-decoded) project spec

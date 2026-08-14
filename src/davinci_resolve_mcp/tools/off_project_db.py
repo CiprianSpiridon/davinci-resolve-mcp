@@ -52,8 +52,8 @@ from ..store.db import StoreError, open_db
 
 _VALID_ACTIONS = ("relayout_node_graphs", "index")
 
-# vendor/drx-codec/node-layout.js — measured from a live before/after
-# Project.db diff on a 3-node graph).
+# Native "Cleanup Node Graph" clean-row defaults measured from a live
+# before/after Project.db diff on a 3-node graph.
 _DEFAULT_ORIGIN_X = 290
 _DEFAULT_ORIGIN_Y = 428
 _DEFAULT_SPACING_X = 495

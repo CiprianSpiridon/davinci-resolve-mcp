@@ -12,16 +12,10 @@ single action:
     whether the track's channel count matches the bus it is routed to),
     a main-bus summary, and any routing warnings.
 
-DaVinci Resolve's scripting API has no bus-routing surface at all — see
-the reference ``fairlight.mjs`` / ``vendor/fairlight``, which patches the
-reverse-engineered ``FLStudioModelBA`` binary blob inside a live project's
-SQLite database (Section 6 bus-definition table, 0xBC-anchored bus-name
-records, per-bus property records) to configure buses. This tool produces
+DaVinci Resolve's scripting API has no bus-routing surface at all. This tool produces
 the *plan* a human, or a separate DB-patching tool, would need — it never
 opens a database, never touches a project file, and never connects to a
-running Resolve instance. The bus-format -> channel-count table and the
-Fairlight "audio bus" type code below mirror that reference (read, not
-copied); this module is original Python.
+running Resolve instance.
 
 Every code path returns a JSON string; nothing here raises — invalid
 routing specs are reported as a clean JSON ``"error"`` field, and any
@@ -40,9 +34,7 @@ from ..app import mcp
 
 _VALID_ACTIONS = ("route",)
 
-# ── Fairlight bus format -> channel-count table (mirrors the reference
-# fairlight.mjs FORMAT_CHANNELS table, read from the reverse-engineered
-# FLStudioModelBA bus-definition table) ──────────────────────────────────
+# ── Fairlight bus format -> channel-count table ──────────────────────────────────
 FORMAT_CHANNELS: dict[str, int] = {
     "mono": 1,
     "stereo": 2,
@@ -54,7 +46,7 @@ FORMAT_CHANNELS: dict[str, int] = {
 
 # Reverse lookup used to label a bus/track that was given an explicit
 # channel count instead of a named format. Only one canonical name per
-# channel count (matches the reference CHANNELS_FORMAT table).
+# channel count.
 CHANNELS_FORMAT: dict[int, str] = {1: "mono", 2: "stereo", 6: "5.1", 8: "7.1", 16: "7.1.4"}
 
 # Fairlight "audio" bus type code from the reverse-engineered bus table.
@@ -220,8 +212,7 @@ def fairlight_plan(action: str, routing_json: str = "") -> str:
     """Offline Fairlight bus-routing planner. Never touches Resolve.
 
     DaVinci Resolve's scripting API cannot create or route Fairlight
-    buses; the reference implementation patches a project's SQLite
-    database directly. This tool instead computes the *routing plan* a
+    buses. This tool computes the *routing plan* a
     caller (or a separate DB-patching step) would need, purely from an
     in-memory spec.
 

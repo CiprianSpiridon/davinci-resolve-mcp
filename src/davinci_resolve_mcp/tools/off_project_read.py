@@ -16,9 +16,9 @@ actions:
     `value`) or several AND-combined predicates (`predicates_json`).
 
 This is a thin dispatch/IO layer over :mod:`davinci_resolve_mcp.formats.drp`
-project-inspection tooling (read for shape, not copied: this module is
-original Python) — it does not reimplement ZIP/XML/SeqContainer/Media-Pool
-parsing itself, it only resolves file paths, calls into the formats layer,
+and :mod:`davinci_resolve_mcp.formats.drt`. It does not reimplement
+ZIP/XML/SeqContainer/Media-Pool parsing itself; it only resolves file paths,
+calls into the formats layer,
 flattens the result into clip records, and shapes JSON responses.
 
 This module NEVER connects to DaVinci Resolve: no ``DaVinciResolveScript``

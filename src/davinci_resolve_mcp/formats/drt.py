@@ -91,8 +91,8 @@ _CLIP_TAGS = {
 
 # Frame rates in a .drt/.drp are stored as a hex-encoded IEEE-754 double
 # (little-endian) — e.g. 24.0 -> "0000000000003840". We encode/decode directly
-# carried a hand-transcribed lookup table whose 23.976/29.97 entries were in
-# fact inaccurate, so it is deliberately not reused here).
+# with ``struct`` so the value round-trips exactly, including fractional rates
+# such as 23.976 and 29.97.
 
 
 # ---------------------------------------------------------------------------

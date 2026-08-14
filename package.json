@@ -12,7 +12,7 @@
     "pyproject.toml",
     "requirements.txt",
     "src/**/*.py",
-    "davinci-resolve/**",
+    "skills/**",
     "README.md",
     "INSTALL.md",
     "LICENSE"

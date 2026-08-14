@@ -71,3 +71,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "requires_resolve: live integration tests that require a running DaVinci Resolve session",
+]

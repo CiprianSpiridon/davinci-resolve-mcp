@@ -24,6 +24,7 @@ htmlcov/
 # Tests and fixtures — not needed to run the installed server
 tests/
 
+# Local examples
 
 # Planning / workflow tooling for this repo, not part of the shipped product
 .ulpi/

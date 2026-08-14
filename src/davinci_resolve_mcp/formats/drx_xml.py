@@ -43,7 +43,7 @@ __all__ = [
     "serialize_drx",
 ]
 
-# Framing byte that prefixes a .drx correction Body (see parameter-codec.js /
+# Framing byte that prefixes a .drx correction Body:
 #   0x81 -> the remaining bytes are a zstd frame (magic 28 b5 2f fd)
 #   0x80 -> STORED: the remaining bytes are the raw (uncompressed) protobuf
 _FRAME_ZSTD = 0x81
@@ -55,7 +55,7 @@ _FRAME_STORED = 0x80
 # only ever appears inside element tag names in these documents (never in
 # attribute values, comments, or the hex/base64 blob payloads), we transform it
 # to a reversible sentinel around ElementTree, and restore the real ``::`` on
-# serialize — so fixtures stay byte-exact and written .drx re-import into Resolve.
+# serialize — so documents stay byte-exact and written .drx re-import into Resolve.
 _NS_TOKEN = "__DRXNS__"
 
 

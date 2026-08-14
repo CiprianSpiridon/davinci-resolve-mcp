@@ -38,6 +38,7 @@ htmlcov/
 !.claude/skills/davinci-resolve-use-plugins
 !.claude/skills/davinci-resolve-generate-plugin-list
 skills-lock.json
+# Local examples
 
 # Local Ulpi artifacts
 .ulpi/

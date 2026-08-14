@@ -1273,7 +1273,7 @@ def rename_gallery_album(
 # A GalleryStill is an opaque handle with no methods of its own — it's only
 # ever a parameter to GalleryStillAlbum methods. This repo has no object-id
 # registry, so a still is addressed by its 0-based index into the ordered
-# registry). Every tool re-fetches that list so an index always refers to
+# list ``album.GetStills()`` returns. Every tool re-fetches that list so an index always refers to
 # the album's current contents.
 
 _STILL_EXPORT_FORMATS = (

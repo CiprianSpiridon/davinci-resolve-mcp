@@ -16,9 +16,8 @@ Registers exactly one action-dispatch tool, ``drp``, with three actions:
     leaving every other clip and every other archive member byte-for-byte
     untouched.
 
-This is a thin dispatch/IO layer over :mod:`davinci_resolve_mcp.formats.drp`
-here, not copied: this module is original Python) — it does not
-reimplement ZIP/XML/Media-Pool parsing itself, it only resolves file
+This is a thin dispatch/IO layer over :mod:`davinci_resolve_mcp.formats.drp`.
+It does not reimplement ZIP/XML/Media-Pool parsing itself; it only resolves file
 paths, calls into the formats layer, and shapes JSON responses.
 
 The Media-Pool-blob link invariant

@@ -1,6 +1,7 @@
 """Offline unit tests for the ``tools.fx_plugins`` Resolve-independent surface.
 
 These tests exercise the parts of ``fx_plugins`` that need NO running DaVinci
+Resolve and NO network — the packaged ResolveFX registry, the filesystem
 template/OFX scanners, and the DCTL/Fuse installers — driven entirely against
 seeded ``tmp_path`` fixtures. Nothing here starts, mocks, or otherwise touches
 a live Resolve instance; the module must import with Resolve absent (the
@@ -11,9 +12,9 @@ real package with no Resolve present and assert on the actual behaviour of the
 registered tool callables. The ``@mcp.tool()`` decorator returns the underlying
 function unchanged, so each tool is invoked directly.
 
-installer at :23157 and the ``dctl`` installer at :23392): a NEW plugin is
-written verbatim into its install directory, unsafe names are rejected, and an
-``overwrite=False`` collision writes nothing.
+The install tests require a new plugin to be written verbatim into its install
+directory, reject unsafe names, and ensure an ``overwrite=False`` collision
+writes nothing.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from davinci_resolve_mcp.tools import fx_plugins as fx  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
+# get_resolvefx_registry — packaged JSON, RegID == 'ofx.' + wireId
 # ---------------------------------------------------------------------------
 
 
@@ -47,8 +49,9 @@ def _registry_payload():
     return data
 
 
-def test_registry_loads_vendored_json_with_no_resolve():
+def test_registry_loads_packaged_json_with_no_resolve():
     data = _registry_payload()
+    # The packaged file ships with the package; a non-empty plugin list proves
     # it was loaded from disk with no Resolve session available.
     assert data["count"] == len(data["plugins"])
     assert data["count"] > 0

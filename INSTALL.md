@@ -134,8 +134,8 @@ Optionally run the test suite (installs `pytest` into the venv if missing):
 ./.venv/bin/pip install pytest -q && ./.venv/bin/pytest -q
 ```
 
-**Gate 3:** the snippet prints `OK: 326 tools, 3 resources, all names unique` (the count
-must be ≥ 100; 326 is expected — 308 live Resolve tools + 18 offline file tools). If it
+**Gate 3:** the snippet prints `OK: 334 tools, 3 resources, all names unique` (the count
+must be ≥ 100; 334 is expected — 316 live Resolve tools + 18 offline file tools). If it
 errors on import, the install is broken — see Troubleshooting; do not proceed to register
 a broken server.
 
@@ -225,14 +225,14 @@ Code — `claude mcp list` shows it. Confirm the human restarted the client app.
 
 ### 5d — install the bundled agent skills GLOBALLY (Claude Code + Cowork)
 
-This repo ships **four agent skills** (canonical sources: the root-level `davinci-resolve*`
-folders, each symlinked into `.claude/skills/`). They auto-load when Claude Code runs **inside
+This repo ships **four agent skills** under the canonical [`skills/`](./skills/) directory,
+each symlinked into `.claude/skills/`. They auto-load when Claude Code runs **inside
 this repo**, but **Claude Code and Claude Cowork both read `~/.claude/skills/`**, so install
 them **globally** so they're available everywhere:
 
 | Skill (root folder) | What it does |
 |---|---|
-| `davinci-resolve` | **Base** — set up **and** operate the MCP (all 326 tools). Start here. |
+| `davinci-resolve` | **Base** — set up **and** operate the MCP (all 334 tools). Start here. |
 | `davinci-resolve-use-plugins` | Apply ResolveFX/OFX to a clip and insert Fusion title/generator template packs (incl. purchased MotionVFX `.drfx`). |
 | `davinci-resolve-generate-plugin-list` | Index every installed plugin/effect/template into a TOC (`.json`/`.md` + a `CLAUDE.md` summary) that `use-plugins` consumes. Run once per machine / after installing packs. |
 | `davinci-resolve-remove-silences-bad-takes-and-umms` | Non-destructive first-pass editorial clean — remove dead-air silences, filler `um/uh`, and bad takes; verify A/V sync. |
@@ -247,7 +247,7 @@ for s in davinci-resolve \
          davinci-resolve-use-plugins \
          davinci-resolve-generate-plugin-list \
          davinci-resolve-remove-silences-bad-takes-and-umms; do
-  cp -r "$s" ~/.claude/skills/"$s"
+  cp -r "skills/$s" ~/.claude/skills/"$s"
 done
 ```
 
@@ -302,7 +302,7 @@ project data.**
 ## What "done" looks like (report this back to the user)
 
 - Repo at `<absolute path>`, virtualenv installed, `davinci-resolve-mcp` binary present.
-- Offline gate: **326 tools, 3 resources, unique names** (Phase 3).
+- Offline gate: **334 tools, 3 resources, unique names** (Phase 3).
 - Server registered with `<client>` using the absolute binary path.
 - **All four agent skills installed globally** (Phase 5d): `davinci-resolve` (base) +
   `davinci-resolve-use-plugins`, `davinci-resolve-generate-plugin-list`,

@@ -27,8 +27,9 @@ protobuf walk — and exposes it as a byte-exact codec:
     ``"unparsed"`` field holds the undecodable remainder.
 ``encode_fields(decoded) -> bytes | str``
     Re-encode a dict produced by :func:`decode_fields` back to a framed blob.
-    fixtures (Resolve 19 uses zstd level 1; recompression reproduces the frame
-    exactly, and the original blob is retained as a verbatim fallback).
+    ``encode_fields(decode_fields(b)) == b`` byte-for-byte for supported
+    documents (Resolve 19 uses zstd level 1; recompression reproduces the frame
+    exactly when possible, and the original blob is retained as a verbatim fallback).
 
 The value-editing path (patching a parameter's float in place) is structural
 only — it produces a well-formed blob, but the numeric UI calibration is not
@@ -74,6 +75,7 @@ FRAME_STORED = 0x80  # payload after this byte is the raw (uncompressed) protobu
 
 # Resolve 19 writes its grade frames with zstd level 1; recompressing the
 # decompressed body at this level reproduces the on-disk frame byte-exactly for
+# captured Resolve documents. If a future frame does not reproduce, the original
 # blob (retained on decode) is emitted verbatim instead.
 _ZSTD_LEVEL = 1
 
@@ -89,6 +91,7 @@ _WT_FIXED32 = 5
 
 # ---------------------------------------------------------------------------
 # Parameter id -> semantic name map (documented subset; see
+# DRX-VALUE-SCALING.md). Unknown ids fall
 # back to ``param_<id>`` so nothing is dropped.
 # ---------------------------------------------------------------------------
 # (control, channel) per id.
@@ -529,6 +532,7 @@ def encode_fields(decoded: Dict[str, Any]) -> Union[bytes, str]:
 
     Byte-exact guarantee: when no parameter value has changed, the output equals
     the input exactly — recompression at zstd level 1 reproduces Resolve's frame
+    for supported Resolve documents, and the original blob is emitted verbatim as a
     fallback should a frame ever fail to reproduce.  Editing a value produces a
     well-formed blob whose numeric calibration is structural-only (unverified
     against live Resolve).

@@ -17,8 +17,8 @@ The single source of truth for every enum is ``_ENUMS`` below
 (DynamicZoomEase 0-3, CompositeMode 0-31, RetimeProcess 0-3,
 MotionEstimation 0-6, Scaling 0-4, ResizeFilter 0-15) and for every
 scalar property the ``_PROPERTY_SCHEMA`` table (key -> type + accepted
-range). Both mirror the "Looking up Timeline item properties" section of
-the Resolve scripting API reference
+range). Both follow the "Looking up Timeline item properties" section of
+the Resolve scripting API documentation.
 
 ``get_inspector_properties`` reuses ``resolve_utils.timeline_item_to_dict_full``.
 ``inspector_property_reference`` needs no Resolve connection at all — it
